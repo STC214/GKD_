@@ -26,6 +26,30 @@
 
 如遇问题请先查看 [疑难解答](https://gkd.li/guide/faq)
 
+## KernelSU / SukiSU Ultra 模块
+
+本 fork 额外提供一个轻量模块包装：保留 GKD 作为普通 Android App，由 KernelSU/SukiSU Ultra 模块在开机后完成安装、授权、保活白名单和启动辅助。
+
+模块源码位于 [`ksu-sukisu-module/`](ksu-sukisu-module/)，在 Windows 下可从仓库根目录执行：
+
+```powershell
+.\ksu-sukisu-module\scripts\package-ksu-module.ps1
+```
+
+生成的可刷入模块包位于：
+
+```text
+ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
+```
+
+默认配置不会自动开启无障碍，也不会在移除模块时卸载 GKD。刷入后如需调整，可编辑：
+
+```text
+/data/adb/modules/gkd_ksu_sukisu/config.conf
+```
+
+如果手机上已安装的 GKD 与模块内 APK 签名一致，不需要先卸载，模块会覆盖安装并保留数据。如果签名不一致，请先在 GKD 内导出/备份配置，再卸载现有 App，或改用同签名 APK 重新打包模块。
+
 ## 截图
 
 |                                                               |                                                               |                                                               |                                                               |
