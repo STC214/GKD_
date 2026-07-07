@@ -1,26 +1,27 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# IDE and local machine files
 .DS_Store
+.idea
+.vscode
+*.iml
+local.properties
+
+# Build and tool caches
+.cxx
+.externalNativeBuild
+.gradle
+/.cache
+/.kotlin
 /build
 /captures
-.externalNativeBuild
-.cxx
-local.properties
-.idea
 /kotlin-js-store
-.vscode
 
+# Signing files
 *.jks
 *.keystore
 
-/.cache
-/.kotlin
-
+# Generated Gradle metadata
 /gradle/libs.versions.updates.toml
+
+# Local module package outputs
+/ksu-sukisu-module/dist/
+/ksu-sukisu-module/work/
