@@ -50,6 +50,8 @@ ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
 
 如果手机上已安装的 GKD 与模块内 APK 签名一致，不需要先卸载，模块会覆盖安装并保留数据。如果签名不一致，请先在 GKD 内导出/备份配置，再卸载现有 App，或改用同签名 APK 重新打包模块。
 
+如需使用 GKD 的 Shizuku 相关能力，请先确保 Sui/Shizuku 本身已正常运行。若 GKD 提示 Shizuku 授权失败，可参考 [`ksu-sukisu-module/README.md`](ksu-sukisu-module/README.md) 的排障章节检查 Sui 模块是否安装完整。
+
 ## 截图
 
 |                                                               |                                                               |                                                               |                                                               |

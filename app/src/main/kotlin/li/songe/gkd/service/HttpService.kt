@@ -90,6 +90,7 @@ class HttpService : Service(), OnSimpleLife by DefaultSimpleLifeImpl() {
             if (storeFlow.value.autoClearMemorySubs) {
                 deleteSubscription(LOCAL_HTTP_SUBS_ID)
             }
+            httpServerFlow.value?.stop()
             httpServerFlow.value = null
         }
         onCreated {

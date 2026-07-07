@@ -20,7 +20,6 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 // https://github.com/npes87184/ScreenShareTile/blob/master/app/src/main/java/com/npes87184/screenshottile/ScreenshotService.kt
-
 class ScreenshotUtil(
     private val context: Context,
     private val screenshotIntent: Intent
@@ -30,7 +29,6 @@ class ScreenshotUtil(
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var mediaProjection: MediaProjection? = null
-
 
     private val mediaProjectionManager by lazy {
         context.getSystemService(
@@ -46,42 +44,57 @@ class ScreenshotUtil(
         get() = ScreenUtils.getScreenDensityDpi()
 
     fun destroy() {
-        imageReader?.setOnImageAvailableListener(null, null)
-        virtualDisplay?.release()
-        imageReader?.close()
+        releaseCapture()
         mediaProjection?.stop()
+        mediaProjection = null
     }
 
-    //    TODO android13 上一半概率获取到全透明图片, android12 暂无此问题
+    private fun releaseCapture(
+        reader: ImageReader? = imageReader,
+        display: VirtualDisplay? = virtualDisplay,
+    ) {
+        reader?.setOnImageAvailableListener(null, null)
+        display?.release()
+        reader?.close()
+        if (reader === imageReader) {
+            imageReader = null
+        }
+        if (display === virtualDisplay) {
+            virtualDisplay = null
+        }
+    }
+
     suspend fun execute() = suspendCancellableCoroutine { cont ->
-        imageReader = ImageReader.newInstance(
+        releaseCapture()
+        val reader = ImageReader.newInstance(
             width, height,
             PixelFormat.RGBA_8888, 2
-        )
+        ).also { imageReader = it }
         if (mediaProjection == null) {
             mediaProjection = mediaProjectionManager.getMediaProjection(
                 RESULT_OK,
                 screenshotIntent
             )
         }
-        virtualDisplay = mediaProjection!!.createVirtualDisplay(
+        val display = mediaProjection!!.createVirtualDisplay(
             "screenshot",
             width,
             height,
             dpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader!!.surface,
+            reader.surface,
             null,
             handler
-        )
+        ).also { virtualDisplay = it }
         var resumed = false
-        imageReader!!.setOnImageAvailableListener({ reader ->
+        cont.invokeOnCancellation { releaseCapture(reader, display) }
+        reader.setOnImageAvailableListener({ callbackReader ->
             if (resumed) return@setOnImageAvailableListener
             var image: Image? = null
             var bitmapWithStride: Bitmap? = null
             val bitmap: Bitmap?
             try {
-                image = reader.acquireLatestImage()
+                image = callbackReader.acquireLatestImage()
                 if (image != null) {
                     val planes = image.planes
                     val buffer = planes[0].buffer
@@ -91,19 +104,21 @@ class ScreenshotUtil(
                     bitmapWithStride.copyPixelsFromBuffer(buffer)
                     bitmap = Bitmap.createBitmap(bitmapWithStride, 0, 0, width, height)
                     if (!bitmap.isFullTransparent()) {
-                        imageReader?.setOnImageAvailableListener(null, null)
                         if (cont.isActive) {
                             cont.resume(bitmap)
                         }
                         resumed = true
+                        releaseCapture(callbackReader, display)
+                    } else {
+                        bitmap.recycle()
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                imageReader?.setOnImageAvailableListener(null, null)
                 if (cont.isActive) {
                     cont.resumeWithException(e)
                 }
+                releaseCapture(callbackReader, display)
             } finally {
                 bitmapWithStride?.recycle()
                 image?.close()

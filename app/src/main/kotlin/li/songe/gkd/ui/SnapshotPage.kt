@@ -264,7 +264,10 @@ fun SnapshotPage() {
                             val newBytes = UriUtils.uri2Bytes(uri)
                             val newBitmap =
                                 BitmapFactory.decodeByteArray(newBytes, 0, newBytes.size)
-                            if (oldBitmap.width == newBitmap.width && oldBitmap.height == newBitmap.height) {
+                            val sameSize = oldBitmap.width == newBitmap.width && oldBitmap.height == newBitmap.height
+                            oldBitmap.recycle()
+                            newBitmap.recycle()
+                            if (sameSize) {
                                 snapshotVal.screenshotFile.writeBytes(newBytes)
                                 if (snapshotVal.githubAssetId != null) {
                                     // 当本地快照变更时, 移除快照链接

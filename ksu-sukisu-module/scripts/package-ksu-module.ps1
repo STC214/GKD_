@@ -53,7 +53,38 @@ Copy-Item -Path (Join-Path $templateDir "*") -Destination $stagingDir -Recurse -
 Copy-Item -Path $resolvedApk -Destination (Join-Path $stagingDir "common\gkd.apk") -Force
 
 Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $stagingDir "*") -DestinationPath $OutputPath -Force
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zipFile = [System.IO.Compression.ZipFile]::Open($OutputPath, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    $stagingFullPath = (Resolve-Path $stagingDir).Path.TrimEnd('\', '/')
+    Get-ChildItem -LiteralPath $stagingDir -Recurse -File | ForEach-Object {
+        $relativePath = $_.FullName.Substring($stagingFullPath.Length + 1).Replace('\', '/')
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $zipFile,
+            $_.FullName,
+            $relativePath,
+            [System.IO.Compression.CompressionLevel]::Optimal
+        ) | Out-Null
+    }
+}
+finally {
+    $zipFile.Dispose()
+}
+
+$zipCheck = [System.IO.Compression.ZipFile]::OpenRead($OutputPath)
+try {
+    $badEntry = $zipCheck.Entries |
+        Where-Object { $_.FullName.Contains('\') } |
+        Select-Object -First 1
+    if ($badEntry) {
+        throw "Invalid zip entry path contains backslash: $($badEntry.FullName)"
+    }
+}
+finally {
+    $zipCheck.Dispose()
+}
 
 Write-Host "Packaged module: $OutputPath"
 Write-Host "Bundled APK: $resolvedApk"

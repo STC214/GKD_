@@ -257,26 +257,33 @@ object SnapshotExt {
                     } else {
                         finalBitmap
                     }
+                    if (processedBitmap !== finalBitmap) {
+                        finalBitmap.recycle()
+                    }
                     processedBitmap to status
                 }
                 d1.await() to d2.await()
             }
 
             val (bitmap, currentStatus) = screenResult // 拆开(图片+状态)
-            withContext(Dispatchers.IO) {
-                snapshotParentPath(snapshot.id).autoMk()
-                screenshotFile(snapshot.id).outputStream().use { stream ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-                }
-                snapshotFile(snapshot.id).writeText(keepNullJson.encodeToString(snapshot))
-                minSnapshotFile(snapshot.id).writeText(
-                    keepNullJson.encodeToString(
-                        snapshot.copy(
-                            nodes = emptyList()
+            try {
+                withContext(Dispatchers.IO) {
+                    snapshotParentPath(snapshot.id).autoMk()
+                    screenshotFile(snapshot.id).outputStream().use { stream ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                    }
+                    snapshotFile(snapshot.id).writeText(keepNullJson.encodeToString(snapshot))
+                    minSnapshotFile(snapshot.id).writeText(
+                        keepNullJson.encodeToString(
+                            snapshot.copy(
+                                nodes = emptyList()
+                            )
                         )
                     )
-                )
-                DbSet.snapshotDao.insert(snapshot.toSnapshot())
+                    DbSet.snapshotDao.insert(snapshot.toSnapshot())
+                }
+            } finally {
+                bitmap.recycle()
             }
             val tip = when (currentStatus) {
                 ScreenWhy.NotHave -> "快照成功 (无截图)"

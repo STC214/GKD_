@@ -36,6 +36,45 @@ package_installed() {
   pm path "$GKD_PACKAGE" >/dev/null 2>&1
 }
 
+run_retry() {
+  local label="$1"
+  shift
+  local tries=0
+  local delay=2
+  local output
+  local status
+
+  while [ "$tries" -lt 8 ]; do
+    output="$("$@" 2>&1)"
+    status=$?
+    if [ "$status" -eq 0 ]; then
+      [ -n "$output" ] && log "$label: $output"
+      return 0
+    fi
+
+    log "$label failed ($status): $output"
+    tries=$((tries + 1))
+    sleep "$delay"
+    [ "$delay" -lt 10 ] && delay=$((delay + 2))
+  done
+
+  return 1
+}
+
+wait_system_services() {
+  local tries=0
+  while [ "$tries" -lt 60 ]; do
+    if pm path android >/dev/null 2>&1 &&
+      cmd activity get-current-user >/dev/null 2>&1; then
+      return 0
+    fi
+    tries=$((tries + 1))
+    sleep 2
+  done
+  log "system service wait timeout; continue anyway"
+  return 1
+}
+
 install_apk() {
   [ "$GKD_AUTO_INSTALL" = "1" ] || return 0
   if [ ! -f "$APK" ]; then
@@ -78,15 +117,15 @@ grant_permissions() {
   fi
 
   log "granting permissions and appops for $GKD_PACKAGE"
-  pm grant "$GKD_PACKAGE" android.permission.POST_NOTIFICATIONS >> "$LOG" 2>&1
-  pm grant "$GKD_PACKAGE" android.permission.WRITE_SECURE_SETTINGS >> "$LOG" 2>&1
+  run_retry "grant POST_NOTIFICATIONS" pm grant "$GKD_PACKAGE" android.permission.POST_NOTIFICATIONS
+  run_retry "grant WRITE_SECURE_SETTINGS" pm grant "$GKD_PACKAGE" android.permission.WRITE_SECURE_SETTINGS
 
-  cmd appops set "$GKD_PACKAGE" SYSTEM_ALERT_WINDOW allow >> "$LOG" 2>&1
-  cmd appops set "$GKD_PACKAGE" RUN_IN_BACKGROUND allow >> "$LOG" 2>&1
-  cmd appops set "$GKD_PACKAGE" RUN_ANY_IN_BACKGROUND allow >> "$LOG" 2>&1
-  cmd appops set "$GKD_PACKAGE" GET_USAGE_STATS allow >> "$LOG" 2>&1
+  run_retry "appops SYSTEM_ALERT_WINDOW" cmd appops set "$GKD_PACKAGE" SYSTEM_ALERT_WINDOW allow
+  run_retry "appops RUN_IN_BACKGROUND" cmd appops set "$GKD_PACKAGE" RUN_IN_BACKGROUND allow
+  run_retry "appops RUN_ANY_IN_BACKGROUND" cmd appops set "$GKD_PACKAGE" RUN_ANY_IN_BACKGROUND allow
+  run_retry "appops GET_USAGE_STATS" cmd appops set "$GKD_PACKAGE" GET_USAGE_STATS allow
 
-  dumpsys deviceidle whitelist +"$GKD_PACKAGE" >> "$LOG" 2>&1
+  run_retry "deviceidle whitelist" dumpsys deviceidle whitelist +"$GKD_PACKAGE"
 }
 
 enable_accessibility() {
@@ -124,14 +163,15 @@ start_gkd() {
   fi
 
   log "starting $GKD_PACKAGE"
-  monkey -p "$GKD_PACKAGE" 1 >> "$LOG" 2>&1 || am start -n "$GKD_PACKAGE/.MainActivity" >> "$LOG" 2>&1
+  run_retry "start monkey" monkey -p "$GKD_PACKAGE" 1 ||
+    run_retry "start activity" am start -n "$GKD_PACKAGE/.MainActivity"
 }
 
 {
   load_config
   log "service started"
   if wait_boot_completed; then
-    sleep 10
+    wait_system_services
     install_apk && {
       grant_permissions
       enable_accessibility
