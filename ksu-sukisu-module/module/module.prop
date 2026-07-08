@@ -3,4 +3,4 @@ name=GKD KernelSU/SukiSU Helper
 version=0.1.0
 versionCode=1
 author=STC214
-description=Installs GKD and applies root-side permission/startup helpers for KernelSU and SukiSU Ultra.
+description=Installs GKD and applies root-side permission/startup helpers for KernelSU and SukiSU Ultra. 卸载本模块之前请确保已经备份 GKD 设置。

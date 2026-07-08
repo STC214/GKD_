@@ -57,14 +57,16 @@ GKD_AUTO_GRANT=1
 GKD_AUTO_ENABLE_A11Y=0
 GKD_AUTO_START=1
 GKD_REQUIRE_BUNDLED_APK=0
-GKD_UNINSTALL_ON_REMOVE=0
+GKD_UNINSTALL_ON_REMOVE=1
 ```
+
+卸载本模块之前，请确保已经备份 GKD 设置。
 
 `GKD_AUTO_ENABLE_A11Y=1` 会写入 Android secure settings 来启用 GKD 无障碍服务。此行为较强，且 ROM 兼容性不同，所以默认关闭。
 
 `GKD_REQUIRE_BUNDLED_APK=0` 表示如果模块内 APK 因签名不一致等原因无法覆盖安装，会继续给已安装的 GKD 授权/启动。设为 `1` 时，模块内 APK 安装失败就停止后续动作。
 
-`GKD_UNINSTALL_ON_REMOVE=0` 表示移除模块时不会卸载 GKD，也不会删除 GKD 数据。设为 `1` 时，移除模块会尝试卸载 user 0 下的 GKD。
+`GKD_UNINSTALL_ON_REMOVE=1` means removing the module will also try to uninstall GKD for user 0.
 
 ## 已安装 GKD 的处理
 
