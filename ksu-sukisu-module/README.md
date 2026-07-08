@@ -1,16 +1,16 @@
 # GKD KernelSU / SukiSU Ultra 模块
 
-这个目录提供一个轻量模块包装：GKD 仍然作为普通 Android App 运行，KernelSU/SukiSU Ultra 模块只负责 root 侧安装、授权、保活白名单和启动辅助。
+这个目录提供一个轻量模块包装：GKD 仍然作为普通 Android App 运行，KernelSU/SukiSU Ultra 模块负责 root 侧安装、授权、保活白名单和启动辅助。
 
 模块不改写 GKD 的无障碍规则引擎，也不是 LSPosed 重写版。
 
 ## 文件结构
 
-- `module/module.prop`：模块元信息。
+- `module/module.prop`：模块元信息；版本号使用分钟级时间戳。
 - `module/customize.sh`：刷入时校验内置 APK，并设置脚本权限。
-- `module/service.sh`：开机后等待系统服务就绪，安装 APK、授予权限、加入电池白名单并启动 GKD；关键命令会重试，避免刚开机时 `package/appops/activity` 服务未就绪导致失败。
-- `module/action.sh`：模块管理器动作按钮，点击后打开 GKD，并在执行页显示基础状态和最近的开机服务日志。
-- `module/uninstall.sh`：移除模块时清理电池白名单，可选卸载 GKD。
+- `module/service.sh`：开机后等待系统服务就绪，安装 APK、授予权限、加入电池白名单，并后台启动 GKD 进程；不会主动弹出 GKD 界面。
+- `module/action.sh`：模块管理器动作按钮；点击后打开 GKD，并在执行页显示基础状态和最近的开机服务日志。
+- `module/uninstall.sh`：移除模块时清理电池白名单，并默认卸载 user 0 下的 GKD App。
 - `module/config.conf`：运行时配置。
 - `module/skip_mount`：声明此模块不 overlay 系统文件。
 - `scripts/package-ksu-module.ps1`：Windows 打包脚本。
@@ -62,17 +62,35 @@ GKD_UNINSTALL_ON_REMOVE=1
 
 卸载本模块之前，请确保已经备份 GKD 设置。
 
+`GKD_AUTO_INSTALL=1` 表示开机后自动安装或覆盖安装模块内置的 GKD APK。
+
+`GKD_AUTO_GRANT=1` 表示开机后自动授予通知、写入安全设置、后台运行、悬浮窗、使用情况访问等辅助权限或 AppOps。
+
 `GKD_AUTO_ENABLE_A11Y=1` 会写入 Android secure settings 来启用 GKD 无障碍服务。此行为较强，且 ROM 兼容性不同，所以默认关闭。
+
+`GKD_AUTO_START=1` 表示开机后后台启动 GKD 进程，不主动显示 GKD 界面。
 
 `GKD_REQUIRE_BUNDLED_APK=0` 表示如果模块内 APK 因签名不一致等原因无法覆盖安装，会继续给已安装的 GKD 授权/启动。设为 `1` 时，模块内 APK 安装失败就停止后续动作。
 
-`GKD_UNINSTALL_ON_REMOVE=1` means removing the module will also try to uninstall GKD for user 0.
+`GKD_UNINSTALL_ON_REMOVE=1` 表示移除模块时会尝试卸载 user 0 下的 GKD App，因此卸载前应先在 GKD 内导出或备份配置。
 
 ## 已安装 GKD 的处理
 
 如果已安装 GKD 与模块内 APK 签名一致，不需要先卸载。模块使用 `pm install -r -d` 覆盖安装，并保留 App 数据。
 
 如果 Android 报告更新失败、签名不兼容，说明已安装 GKD 与模块内 APK 不是同一签名。此时应先在 GKD 内导出/备份配置，再卸载现有 App，或者用同签名 APK 重新打包模块。
+
+## 模块动作按钮
+
+在 KernelSU 或 SukiSU Ultra 中点击模块的“执行”按钮时，模块会打开 GKD 界面，并在执行页输出：
+
+- 模块路径和 GKD 包名
+- GKD 是否已安装
+- 当前关键配置
+- 打开 GKD 的命令结果
+- 最近 20 行 `service.log`
+
+因此关闭 GKD 窗口后，返回模块执行页仍可看到基础执行日志。
 
 ## Shizuku / Sui 排障
 
@@ -95,7 +113,7 @@ nohup: can't execute '/data/adb/modules/zygisk-sui/bin/sui': No such file or dir
 
 说明 Sui 模块安装残缺，`bin/sui` 等安装后产物没有生成。此时应在 KernelSU/SukiSU 管理器中卸载 Sui 模块，重新刷入完整兼容当前 root 环境的 Sui 包，然后重启。修复后再进入 GKD 点击 Shizuku 授权。
 
-如果模块日志里出现 `Failed transaction`，通常是开机早期系统服务尚未完全就绪。本模块的 `service.sh` 已对授权、appops 和启动命令加入等待与重试；重新打包并刷入新版模块后，再重启观察：
+如果模块日志里出现 `Failed transaction`，通常是开机早期系统服务尚未完全就绪。本模块的 `service.sh` 已对授权、AppOps 和启动命令加入等待与重试；重新打包并刷入新版模块后，再重启观察：
 
 ```sh
 su -c "cat /data/adb/modules/gkd_ksu_sukisu/service.log"
