@@ -9,7 +9,7 @@
 - `module/module.prop`：模块元信息。
 - `module/customize.sh`：刷入时校验内置 APK，并设置脚本权限。
 - `module/service.sh`：开机后等待系统服务就绪，安装 APK、授予权限、加入电池白名单并启动 GKD；关键命令会重试，避免刚开机时 `package/appops/activity` 服务未就绪导致失败。
-- `module/action.sh`：模块管理器动作按钮，点击后打开 GKD。
+- `module/action.sh`：模块管理器动作按钮，点击后打开 GKD，并在执行页显示基础状态和最近的开机服务日志。
 - `module/uninstall.sh`：移除模块时清理电池白名单，可选卸载 GKD。
 - `module/config.conf`：运行时配置。
 - `module/skip_mount`：声明此模块不 overlay 系统文件。
