@@ -162,9 +162,10 @@ start_gkd() {
     return 1
   fi
 
-  log "starting $GKD_PACKAGE"
-  run_retry "start monkey" monkey -p "$GKD_PACKAGE" 1 ||
-    run_retry "start activity" am start -n "$GKD_PACKAGE/.MainActivity"
+  log "starting $GKD_PACKAGE in background"
+  run_retry "start expose service" am start-foreground-service \
+    -n "$GKD_PACKAGE/.service.ExposeService" \
+    --ei expose -1
 }
 
 {
