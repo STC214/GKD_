@@ -52,6 +52,24 @@ New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 Copy-Item -Path (Join-Path $templateDir "*") -Destination $stagingDir -Recurse -Force
 Copy-Item -Path $resolvedApk -Destination (Join-Path $stagingDir "common\gkd.apk") -Force
 
+# Android module scripts must use LF and must not contain a UTF-8 BOM. Normalize
+# the staging copy so packaging stays safe even on a Windows checkout with CRLF.
+Get-ChildItem -LiteralPath $stagingDir -Recurse -File |
+    Where-Object { $_.Extension -eq ".sh" -or $_.Name -in @("config.conf", "module.prop", "skip_mount") } |
+    ForEach-Object {
+        $content = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8
+        $content = $content -replace "`r`n", "`n"
+        [System.IO.File]::WriteAllText($_.FullName, $content, [System.Text.UTF8Encoding]::new($false))
+    }
+
+$timestamp = Get-Date -Format "yyyyMMddHHmm"
+$versionCode = $timestamp.Substring($timestamp.Length - 9)
+$stagedModuleProp = Join-Path $stagingDir "module.prop"
+$moduleProp = Get-Content -LiteralPath $stagedModuleProp -Raw -Encoding UTF8
+$moduleProp = $moduleProp -replace '(?m)^version=.*$', "version=$timestamp"
+$moduleProp = $moduleProp -replace '(?m)^versionCode=.*$', "versionCode=$versionCode"
+[System.IO.File]::WriteAllText($stagedModuleProp, $moduleProp, [System.Text.UTF8Encoding]::new($false))
+
 Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
 
 Add-Type -AssemblyName System.IO.Compression

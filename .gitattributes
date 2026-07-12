@@ -1,0 +1,4 @@
+ksu-sukisu-module/module/*.sh text eol=lf
+ksu-sukisu-module/module/*.conf text eol=lf
+ksu-sukisu-module/module/module.prop text eol=lf
+ksu-sukisu-module/module/skip_mount text eol=lf

@@ -28,7 +28,9 @@
 
 ## KernelSU / SukiSU Ultra 模块
 
-本 fork 额外提供一个轻量模块包装：保留 GKD 作为普通 Android App，由 KernelSU/SukiSU Ultra 模块在开机后完成安装、授权、保活白名单和后台启动辅助。开机启动不会主动弹出 GKD 界面；在模块管理器中点击“执行”会打开 GKD，并在执行页显示基础状态和最近的开机服务日志。
+本 fork 额外提供一个轻量模块包装：保留 GKD 作为普通 Android App，由 KernelSU/SukiSU Ultra 模块在开机后完成安装、授权、保活白名单和后台启动辅助，并以默认 5 分钟间隔巡检进程。模块依据 GKD 自身保存的常驻通知开关决定是否恢复该服务，用户主动关闭时不会被反复拉起。开机和守护启动不会主动弹出 GKD 界面；在模块管理器中点击“执行”会打开 GKD，并在执行页显示基础状态和最近的服务日志。
+
+Android 工程现已直接位于仓库根目录，不再使用额外的 `GKD_/` 嵌套目录。`app/`、`gradle/`、`selector/`、`hidden_api/` 和 `ksu-sukisu-module/` 均可从仓库根目录直接访问，本文后续命令也都以仓库根目录为当前目录。
 
 模块源码位于 [`ksu-sukisu-module/`](ksu-sukisu-module/)，在 Windows 下可从仓库根目录执行：
 
@@ -42,7 +44,7 @@
 ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
 ```
 
-模块版本号使用打包时的分钟级时间戳。默认配置不会自动开启无障碍，但移除模块时会同时尝试卸载 user 0 下的 GKD App；卸载本模块之前，请确保已经备份 GKD 设置。刷入后如需调整，可编辑：
+模块版本号使用打包时的分钟级时间戳。默认配置不会自动开启无障碍；守护间隔、定期重授权和保活开关均可配置。移除模块时会同时尝试卸载 user 0 下的 GKD App；卸载本模块之前，请确保已经备份 GKD 设置。刷入后如需调整，可编辑：
 
 ```text
 /data/adb/modules/gkd_ksu_sukisu/config.conf
@@ -51,6 +53,22 @@ ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
 如果手机上已安装的 GKD 与模块内 APK 签名一致，不需要先卸载，模块会覆盖安装并保留数据。如果签名不一致，请先在 GKD 内导出/备份配置，再卸载现有 App，或改用同签名 APK 重新打包模块。
 
 如需使用 GKD 的 Shizuku 相关能力，请先确保 Sui/Shizuku 本身已正常运行。若 GKD 提示 Shizuku 授权失败，可参考 [`ksu-sukisu-module/README.md`](ksu-sukisu-module/README.md) 的排障章节检查 Sui 模块是否安装完整。
+
+## 项目目录
+
+```text
+app/                    GKD Android 应用
+gradle/                 Gradle Wrapper 配置
+hidden_api/             Android 隐藏 API 声明
+selector/               GKD 选择器模块
+ksu-sukisu-module/      KernelSU/SukiSU 安装、授权与保活模块
+local-assets/           本机辅助资料，不纳入 Git
+  packages/             LSPosed、Sui 等第三方安装包
+  device/               设备专用配置
+  diagnostics/          真机诊断日志
+```
+
+`local-assets/` 只用于本机排障和保存外部依赖，不参与 Android 构建或模块打包。Gradle 生成目录及 `ksu-sukisu-module/dist/`、`work/` 同样保持 Git 忽略。
 
 ## 截图
 

@@ -8,7 +8,7 @@
 
 - `module/module.prop`：模块元信息；版本号使用分钟级时间戳。
 - `module/customize.sh`：刷入时校验内置 APK，并设置脚本权限。
-- `module/service.sh`：开机后等待系统服务就绪，安装 APK、授予权限、加入电池白名单，并后台启动 GKD 进程；不会主动弹出 GKD 界面。
+- `module/service.sh`：开机后等待系统服务就绪，安装 APK、授予权限、加入电池白名单并后台启动 GKD；随后低频巡检进程和常驻通知服务，被 ROM 清理后自动恢复，不会主动弹出 GKD 界面。
 - `module/action.sh`：模块管理器动作按钮；点击后打开 GKD，并在执行页显示基础状态和最近的开机服务日志。
 - `module/uninstall.sh`：移除模块时清理电池白名单，并默认卸载 user 0 下的 GKD App。
 - `module/config.conf`：运行时配置。
@@ -17,7 +17,7 @@
 
 ## 打包
 
-在仓库根目录执行：
+Android 工程和本模块目录均直接位于仓库根目录，不需要先进入 `GKD_/` 子目录。在仓库根目录执行：
 
 ```powershell
 .\ksu-sukisu-module\scripts\package-ksu-module.ps1
@@ -56,6 +56,9 @@ GKD_AUTO_INSTALL=1
 GKD_AUTO_GRANT=1
 GKD_AUTO_ENABLE_A11Y=0
 GKD_AUTO_START=1
+GKD_KEEP_ALIVE=1
+GKD_KEEP_ALIVE_INTERVAL=300
+GKD_REGRANT_INTERVAL=1800
 GKD_REQUIRE_BUNDLED_APK=0
 GKD_UNINSTALL_ON_REMOVE=1
 ```
@@ -69,6 +72,12 @@ GKD_UNINSTALL_ON_REMOVE=1
 `GKD_AUTO_ENABLE_A11Y=1` 会写入 Android secure settings 来启用 GKD 无障碍服务。此行为较强，且 ROM 兼容性不同，所以默认关闭。
 
 `GKD_AUTO_START=1` 表示开机后后台启动 GKD 进程，不主动显示 GKD 界面。
+
+`GKD_KEEP_ALIVE=1` 表示开机启动完成后继续运行 root 侧守护巡检；GKD 进程被清理时会尝试后台恢复。模块读取 GKD 自身保存的 `enableStatusService` 设置，仅在用户开启常驻通知时恢复该服务；用户主动关闭后不会被模块反复拉起。设为 `0` 可退回仅开机启动一次的行为。
+
+`GKD_KEEP_ALIVE_INTERVAL=300` 是巡检间隔（秒），小于 60 的值会按 60 处理，避免过于频繁唤醒设备。
+
+`GKD_REGRANT_INTERVAL=1800` 是重新应用后台 AppOps 和电池白名单的间隔（秒），小于 300 的值会按 300 处理。守护不会绕过 `GKD_AUTO_ENABLE_A11Y=0` 的默认选择。
 
 `GKD_REQUIRE_BUNDLED_APK=0` 表示如果模块内 APK 因签名不一致等原因无法覆盖安装，会继续给已安装的 GKD 授权/启动。设为 `1` 时，模块内 APK 安装失败就停止后续动作。
 
