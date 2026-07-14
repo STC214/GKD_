@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import li.songe.gkd.a11y.A11yRuleEngine
 import li.songe.gkd.service.A11yService
+import li.songe.gkd.service.GestureDispatchResult
 import li.songe.gkd.service.TrackService
 import li.songe.gkd.shizuku.casted
 import li.songe.gkd.shizuku.shizukuContextFlow
@@ -28,7 +29,53 @@ data class ActionResult(
     val result: Boolean,
     val shell: Boolean = false,
     val position: Pair<Float, Float>? = null,
+    val state: ActionResultState = if (result) {
+        ActionResultState.Accepted
+    } else {
+        ActionResultState.Rejected
+    },
 )
+
+@Serializable
+enum class ActionResultState {
+    /** API 或节点接受了动作，但没有提供完成回调。 */
+    Accepted,
+
+    /** 输入序列或无障碍手势已完整执行。 */
+    Completed,
+
+    /** 预留给后续界面状态复核；不能由“已接受/已完成”推断。 */
+    Verified,
+
+    Cancelled,
+    Rejected,
+    TimedOut,
+}
+
+private fun GestureDispatchResult.toActionResultState() = when (this) {
+    GestureDispatchResult.Completed -> ActionResultState.Completed
+    GestureDispatchResult.Cancelled -> ActionResultState.Cancelled
+    GestureDispatchResult.Rejected -> ActionResultState.Rejected
+    GestureDispatchResult.TimedOut -> ActionResultState.TimedOut
+}
+
+private fun ActionResultState.isSuccessful() = when (this) {
+    ActionResultState.Accepted,
+    ActionResultState.Completed,
+    ActionResultState.Verified -> true
+
+    ActionResultState.Cancelled,
+    ActionResultState.Rejected,
+    ActionResultState.TimedOut -> false
+}
+
+private suspend fun dispatchGesture(
+    gestureDescription: GestureDescription,
+    duration: Long,
+): ActionResultState = A11yService.instance?.dispatchGestureAwait(
+    gestureDescription,
+    timeoutMillis = maxOf(3_000L, duration + 2_000L),
+)?.toActionResultState() ?: ActionResultState.Rejected
 
 sealed class ActionPerformer(val action: String) {
     abstract suspend fun perform(
@@ -66,24 +113,32 @@ sealed class ActionPerformer(val action: String) {
                 )
             }
             TrackService.addXyPosition(x, y)
+            if (shizukuContextFlow.value.tap(x, y)) {
+                return ActionResult(
+                    action = action,
+                    result = true,
+                    shell = true,
+                    position = x to y,
+                    state = ActionResultState.Completed,
+                )
+            }
+            val path = Path().apply { moveTo(x, y) }
+            val gestureDescription = GestureDescription.Builder()
+                .addStroke(
+                    GestureDescription.StrokeDescription(
+                        path, 0, ViewConfiguration.getTapTimeout().toLong()
+                    )
+                )
+                .build()
+            val state = dispatchGesture(
+                gestureDescription,
+                ViewConfiguration.getTapTimeout().toLong(),
+            )
             return ActionResult(
                 action = action,
-                result = if (shizukuContextFlow.value.tap(x, y)) {
-                    true
-                } else {
-                    val gestureDescription = GestureDescription.Builder()
-                    val path = Path()
-                    path.moveTo(x, y)
-                    gestureDescription.addStroke(
-                        GestureDescription.StrokeDescription(
-                            path, 0, ViewConfiguration.getTapTimeout().toLong()
-                        )
-                    )
-                    A11yService.instance?.dispatchGesture(
-                        gestureDescription.build(), null, null
-                    ) != null
-                },
-                position = x to y
+                result = state.isSuccessful(),
+                position = x to y,
+                state = state,
             )
         }
     }
@@ -139,28 +194,29 @@ sealed class ActionPerformer(val action: String) {
                 )
             }
             TrackService.addXyPosition(x, y)
+            if (shizukuContextFlow.value.tap(x, y, LONG_DURATION)) {
+                return ActionResult(
+                    action = action,
+                    result = true,
+                    shell = true,
+                    position = x to y,
+                    state = ActionResultState.Completed,
+                )
+            }
+            val path = Path().apply { moveTo(x, y) }
+            val gestureDescription = GestureDescription.Builder()
+                .addStroke(
+                    GestureDescription.StrokeDescription(
+                        path, 0, LONG_DURATION
+                    )
+                )
+                .build()
+            val state = dispatchGesture(gestureDescription, LONG_DURATION)
             return ActionResult(
                 action = action,
-                result = if (shizukuContextFlow.value.tap(x, y, LONG_DURATION)) {
-                    true
-                } else {
-                    val gestureDescription = GestureDescription.Builder()
-                    val path = Path()
-                    path.moveTo(x, y)
-                    gestureDescription.addStroke(
-                        GestureDescription.StrokeDescription(
-                            path, 0, LONG_DURATION
-                        )
-                    )
-                    (A11yService.instance?.dispatchGesture(
-                        gestureDescription.build(), null, null
-                    ) != null).apply {
-                        if (this) {
-                            delay(LONG_DURATION)
-                        }
-                    }
-                },
-                position = x to y
+                result = state.isSuccessful(),
+                position = x to y,
+                state = state,
             )
         }
     }
@@ -247,6 +303,7 @@ sealed class ActionPerformer(val action: String) {
                     result = true,
                     shell = true,
                     position = endX to endY,
+                    state = ActionResultState.Completed,
                 )
             } else {
                 val gestureDescription = GestureDescription.Builder()
@@ -258,16 +315,12 @@ sealed class ActionPerformer(val action: String) {
                         path, 0, swipeArg.duration
                     )
                 )
+                val state = dispatchGesture(gestureDescription.build(), swipeArg.duration)
                 ActionResult(
                     action = action,
-                    result = (A11yService.instance?.dispatchGesture(
-                        gestureDescription.build(), null, null
-                    ) != null).apply {
-                        if (this) {
-                            delay(swipeArg.duration)
-                        }
-                    },
+                    result = state.isSuccessful(),
                     position = endX to endY,
+                    state = state,
                 )
             }
         }

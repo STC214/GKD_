@@ -34,12 +34,11 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         private const val SWIPE_EVENT_HZ_DEFAULT = 120
     }
 
-    fun runTap(x: Float, y: Float) {
+    fun runTap(x: Float, y: Float): Boolean =
         sendTap(InputDevice.SOURCE_TOUCHSCREEN, x, y, Display.INVALID_DISPLAY)
-    }
 
-    fun runSwipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long) {
-        sendSwipe(
+    fun runSwipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long): Boolean {
+        return sendSwipe(
             InputDevice.SOURCE_TOUCHSCREEN,
             x1,
             y1,
@@ -60,12 +59,20 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         duration: Long,
         displayId: Int,
         isDragDrop: Boolean,
-    ) {
+    ): Boolean {
+        val sequence = InputSequenceResult()
         val down = SystemClock.uptimeMillis()
-        injectMotionEvent(
-            inputSource, MotionEvent.ACTION_DOWN, down, down, x1, y1, 1.0f,
-            displayId
+        val downSucceeded = injectMotionEvent(
+            inputSource,
+            MotionEvent.ACTION_DOWN,
+            down,
+            down,
+            x1,
+            y1,
+            1.0f,
+            displayId,
         )
+        if (!sequence.record(downSucceeded)) return false
         if (isDragDrop) {
             // long press until drag start.
             sleep(ViewConfiguration.getLongPressTimeout().toLong())
@@ -92,17 +99,22 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
             now = SystemClock.uptimeMillis()
             elapsedTime = now - down
             val alpha = elapsedTime.toFloat() / duration
-            injectMotionEvent(
-                inputSource, MotionEvent.ACTION_MOVE, down, now,
-                lerp(x1, x2, alpha), lerp(y1, y2, alpha), 1.0f, displayId
+            sequence.record(
+                injectMotionEvent(
+                    inputSource, MotionEvent.ACTION_MOVE, down, now,
+                    lerp(x1, x2, alpha), lerp(y1, y2, alpha), 1.0f, displayId
+                )
             )
             injected++
             now = SystemClock.uptimeMillis()
         }
-        injectMotionEvent(
-            inputSource, MotionEvent.ACTION_UP, down, now, x2, y2, 0.0f,
-            displayId
+        sequence.record(
+            injectMotionEvent(
+                inputSource, MotionEvent.ACTION_UP, down, now, x2, y2, 0.0f,
+                displayId
+            )
         )
+        return sequence.succeeded
     }
 
     private fun sendTap(
@@ -110,10 +122,19 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         x: Float,
         y: Float,
         displayId: Int,
-    ) {
+    ): Boolean {
+        val sequence = InputSequenceResult()
         val now = SystemClock.uptimeMillis()
-        injectMotionEvent(inputSource, MotionEvent.ACTION_DOWN, now, now, x, y, 1.0f, displayId)
-        injectMotionEvent(inputSource, MotionEvent.ACTION_UP, now, now, x, y, 0.0f, displayId)
+        val downSucceeded = injectMotionEvent(
+            inputSource, MotionEvent.ACTION_DOWN, now, now, x, y, 1.0f, displayId
+        )
+        if (!sequence.record(downSucceeded)) return false
+        sequence.record(
+            injectMotionEvent(
+                inputSource, MotionEvent.ACTION_UP, now, now, x, y, 0.0f, displayId
+            )
+        )
+        return sequence.succeeded
     }
 
     private fun injectMotionEvent(
@@ -125,8 +146,8 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         y: Float,
         pressure: Float,
         displayId: Int
-    ) {
-        if (AndroidTarget.S) {
+    ): Boolean {
+        return if (AndroidTarget.S) {
             val axisValues = Map.of<Int, Float>(
                 MotionEvent.AXIS_X, x, MotionEvent.AXIS_Y, y, MotionEvent.AXIS_PRESSURE, pressure
             )
@@ -147,9 +168,13 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
                 }
                 event.casted.setDisplayId(mDisplayId)
             }
-            safeInputManager.compatInjectInputEvent(
-                event, InputManagerHidden.INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
-            )
+            try {
+                safeInputManager.compatInjectInputEvent(
+                    event, InputManagerHidden.INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
+                )
+            } finally {
+                event.recycle()
+            }
         }
     }
 
@@ -162,7 +187,7 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         mWhen: Long,
         axisValues: MutableMap<Int, Float>,
         displayId: Int
-    ) {
+    ): Boolean {
         val pointerCount = 1
         val pointerProperties = arrayOfNulls<PointerProperties>(pointerCount)
         for (i in 0..<pointerCount) {
@@ -201,9 +226,13 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
             mDisplayId,
             DEFAULT_FLAGS,
         )
-        safeInputManager.compatInjectInputEvent(
-            event, InputManagerHidden.INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
-        )
+        return try {
+            safeInputManager.compatInjectInputEvent(
+                event, InputManagerHidden.INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
+            )
+        } finally {
+            event.recycle()
+        }
     }
 
     private fun getInputDeviceId(inputSource: Int): Int {
@@ -236,11 +265,10 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         return (b - a) * alpha + a
     }
 
-    fun runKeyEvent(keyCode: Int) {
-        sendKeyEvent(keyCode)
-    }
+    fun runKeyEvent(keyCode: Int): Boolean = sendKeyEvent(keyCode)
 
-    private fun sendKeyEvent(keyCode: Int) {
+    private fun sendKeyEvent(keyCode: Int): Boolean {
+        val sequence = InputSequenceResult()
         val inputSource = InputDevice.SOURCE_UNKNOWN
         val displayId = Display.INVALID_DISPLAY
         val async = false
@@ -254,17 +282,18 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         if (AndroidTarget.Q) {
             event.casted.setDisplayId(displayId)
         }
-        injectKeyEvent(event, async)
+        if (!sequence.record(injectKeyEvent(event, async))) return false
         val event2 = KeyEvent.changeTimeRepeat(event, SystemClock.uptimeMillis(), 0)
-        injectKeyEvent(KeyEvent.changeAction(event2, KeyEvent.ACTION_UP), async)
+        sequence.record(injectKeyEvent(KeyEvent.changeAction(event2, KeyEvent.ACTION_UP), async))
+        return sequence.succeeded
     }
 
-    private fun injectKeyEvent(event: KeyEvent, async: Boolean) {
+    private fun injectKeyEvent(event: KeyEvent, async: Boolean): Boolean {
         val injectMode: Int = if (async) {
             InputManagerHidden.INJECT_INPUT_EVENT_MODE_ASYNC
         } else {
             InputManagerHidden.INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH
         }
-        safeInputManager.compatInjectInputEvent(event, injectMode)
+        return safeInputManager.compatInjectInputEvent(event, injectMode)
     }
 }

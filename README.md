@@ -75,11 +75,16 @@ local-assets/           本机辅助资料，不纳入 Git
 
 后续开发统一使用以下文档：
 
+- [`docs/current-progress.md`](docs/current-progress.md)：汇总当前已完成阶段、构建与真机状态、未提交工作区内容和下一步任务。
 - [`docs/root-runtime-refactor-plan.md`](docs/root-runtime-refactor-plan.md)：规定窗口判断、规则调度、动作执行和 APK 内置 root 服务的实施顺序、验收标准与回滚点。
 - [`docs/upstream-code-delta-guide.md`](docs/upstream-code-delta-guide.md)：逐项记录本 fork 与官方 GKD 的代码级差异、行为不变量、冲突风险和上游更新后的迁移方法。
 - [`docs/testing/root-runtime-baseline.md`](docs/testing/root-runtime-baseline.md)：记录阶段 0 的 APK、签名、真实规则复现集、固定窗口场景和订阅兼容验收结果。
 
 每个开发阶段都必须同步更新代码差异文档；代码完成但差异记录未更新时，不得将该阶段标记为完成。两份文档共同要求保持现有规则格式、选择器语法、订阅更新、数据库和备份兼容。
+
+当前进度：阶段 0.5 和阶段 2 已完成；阶段 1 的诊断能力已经实现并持续等待真实漏执行现场；下一编码阶段为阶段 3“查询唤醒状态机”。
+
+最新停点已经记录在 `docs/current-progress.md` 的“本轮开发停点”；恢复开发时直接从 `A11yRuleEngine.startQueryJob()` 的查询中事件丢失窗口开始。
 
 ## 截图
 

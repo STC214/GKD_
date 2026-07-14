@@ -1,6 +1,7 @@
 package li.songe.gkd.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.content.Context.WINDOW_SERVICE
 import android.graphics.Bitmap
@@ -15,6 +16,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.google.android.accessibility.selecttospeak.SelectToSpeakService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import li.songe.gkd.a11y.A11yCommonImpl
 import li.songe.gkd.a11y.A11yRuleEngine
 import li.songe.gkd.a11y.topActivityFlow
@@ -30,6 +32,13 @@ import li.songe.gkd.util.componentName
 import li.songe.gkd.util.runMainPost
 import li.songe.gkd.util.toast
 import kotlin.coroutines.resume
+
+enum class GestureDispatchResult {
+    Completed,
+    Cancelled,
+    Rejected,
+    TimedOut,
+}
 
 @SuppressLint("AccessibilityPolicy")
 abstract class A11yService : AccessibilityService(), OnA11yLife by DefaultA11yLifeImpl(),
@@ -76,6 +85,30 @@ abstract class A11yService : AccessibilityService(), OnA11yLife by DefaultA11yLi
     override fun onInterrupt() {}
     override fun onDestroy() = onDestroyed()
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = ruleEngine.onA11yEvent(event)
+
+    suspend fun dispatchGestureAwait(
+        gesture: GestureDescription,
+        timeoutMillis: Long,
+    ): GestureDispatchResult = withTimeoutOrNull(timeoutMillis) {
+        suspendCancellableCoroutine { cont ->
+            val accepted = dispatchGesture(
+                gesture,
+                object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        if (cont.isActive) cont.resume(GestureDispatchResult.Completed)
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        if (cont.isActive) cont.resume(GestureDispatchResult.Cancelled)
+                    }
+                },
+                null,
+            )
+            if (!accepted && cont.isActive) {
+                cont.resume(GestureDispatchResult.Rejected)
+            }
+        }
+    } ?: GestureDispatchResult.TimedOut
 
     val startTime = System.currentTimeMillis()
     override var justStarted: Boolean = true

@@ -491,6 +491,8 @@ app/src/main/kotlin/li/songe/gkd/shizuku/RootBridgeDiagnostics.kt
 app/src/main/kotlin/li/songe/gkd/shizuku/ConnectionCallbackGate.kt
 app/src/test/kotlin/li/songe/gkd/shizuku/RootBridgeDiagnosticsTest.kt
 app/src/test/kotlin/li/songe/gkd/shizuku/ConnectionCallbackGateTest.kt
+scripts/stop-next-root-user-service.sh
+scripts/analyze-decision-diagnostics.ps1
 ```
 
 修改：
@@ -564,7 +566,7 @@ app/src/test/kotlin/li/songe/gkd/a11y/A11yEventQueueTest.kt
 - `SettingsStore.kt`
   - 新增默认 `false` 的 `enableRuleDiagnostics`。旧 `store.json` 缺少字段时使用默认值；只有用户切换开关才产生一次正常设置写入。
 - `AdvancedPage.kt`、`AdvancedVm.kt`
-  - 日志区新增诊断开关和最近决策入口；弹窗通过缓冲 revision 响应每次追加和清空，实时显示缓存数量与最近 30 条，支持复制全部与清空内存。
+  - 日志区新增诊断开关和最近决策入口；弹窗通过缓冲 revision 响应每次追加和清空，实时显示缓存数量与最近 30 条，支持复制全部、清空内存，以及将完整文本导出到应用日志目录的 `decision-diagnostics.txt`。
 
 诊断数据模型：
 
@@ -582,10 +584,13 @@ app/src/test/kotlin/li/songe/gkd/a11y/A11yEventQueueTest.kt
 - 首轮 512 条缓冲在高频事件应用中约十秒填满，因此最终实现提高为 2048 条，并把 `RuleEligible` 移到强制窗口检查之后，避免为必然跳过的规则写两条记录。
 - 最终 2048 条 APK 原地升级后，同一轮哔哩哔哩启动、等待和返回高级设置仅产生 91 条记录；没有发生环形淘汰。
 - GKD 自身零规则使用 `NoApplicableRules/Observed`，不会覆盖目标应用的最近失败。最终最近失败为 `PackageActivityMismatch`，应用 `com.miui.securitycenter`，详情 `foreground=tv.danmaku.bili`，准确保留了过渡窗口与任务前台不一致的现场。
-- 首版 App Debug 单元测试共 8/8 通过；最终审查修复后为 13/13，其中决策缓冲 5 项、连接回调竞态 3 项、连续事件合并 1 项、Root 桥分类 3 项、原有示例 1 项。Selector JVM 测试 18/18、Release 构建通过；最终 APK SHA-256 为 `AC4D66E4FAD64606946C9E9251DCDAC8F215B66DC2CCA4C49E9CF62CDDB764B6`，3,303,799 字节。
+- 首版 App Debug 单元测试共 8/8 通过；最终审查修复后为 13/13，其中决策缓冲 5 项、连接回调竞态 3 项、连续事件合并 1 项、Root 桥分类 3 项、原有示例 1 项。Selector JVM 测试 18/18、Release 构建通过；带日志目录导出的最终 APK SHA-256 为 `A606F46CBF74458FDEEB34223B60C27FF19BAC76472058C3A913BEC835D8E86A`，3,303,799 字节。
 - 最终阶段 1 APK：SHA-256 `32BDAB0954BD77B673C61805321E8F21691004C9EF2122B2FE6F2E7155BF2347`，3,303,851 字节；证书 SHA-256 为 `993B6D94D5AB2F34C95D95DFC6AB002E5BD939E6404BF36BC334998DBD8D9A9A`。
 - 真机 Root UserService 仍为 UID 0，StatusService 保持前台，本轮 logcat 无 `AndroidRuntime` 崩溃。3 个订阅 JSON 的 SHA-256 均与阶段 0 基线一致；`store.json` 因用户开启新增的诊断开关而产生预期设置差异。
-- 审查修复版在同一设备非清数据覆盖安装成功：Root UserService UID `0`，StatusService 前台状态正常，设置和 3 个订阅文件哈希均与安装前一致。首次特殊用途 AppOp 故障注入证明仅 `stopSelf()` 仍会被 Android 16 判定为未及时进入前台；改用 `shortService` 后在 AppOp 明确保持 `ignore` 时 `ExposeService(expose=0)` 正常生成快照、服务自行结束且零新增崩溃，随后 AppOp 已恢复为 `allow`。UserService 超时和重连中禁用仍为待测项。
+- 审查修复版在同一设备非清数据覆盖安装成功：Root UserService UID `0`，StatusService 前台状态正常，设置和 3 个订阅文件哈希均与安装前一致。首次特殊用途 AppOp 故障注入证明仅 `stopSelf()` 仍会被 Android 16 判定为未及时进入前台；改用 `shortService` 后在 AppOp 明确保持 `ignore` 时 `ExposeService(expose=0)` 正常生成快照、服务自行结束且零新增崩溃，随后 AppOp 已恢复为 `allow`。
+- `stop-next-root-user-service.sh` 真机命中首次三秒超时：PID `17466` 暂停 4.5 秒，3.001 秒时记录 `connection cancelled`，随后 attempt `2/3` 连接成功；旧 PID 消失，只保留新的 UID 0 服务，零崩溃。
+- 同一脚本连续暂停 PID `22856`、`23210`，在第二次重连进行中通过应用开关关闭 Shizuku；恢复进程后没有第三次尝试、没有残留 Root UserService，重新开启后 UID 0 服务恢复，零崩溃。
+- 哔哩哔哩高频场景导出 740 条记录、200 个关联 ID；31 个事件型 ID 中包含 25 个哔哩哔哩 ID，`EventReceived` 孤立 ID 为 0；1 个合并事件 ID 同样拥有后续记录。
 
 上游冲突策略：
 
@@ -597,18 +602,58 @@ app/src/test/kotlin/li/songe/gkd/a11y/A11yEventQueueTest.kt
 
 ### 9.2 阶段 2：动作结果修复
 
-预计修改：
+状态：`CURRENT`（工作区，阶段 2 自动测试和真机验收完成）。
 
-- `GkdAction.kt`：不再使用非 null 代替动作成功。
-- `InputManager.kt`：返回真实注入结果。
-- `InputShellCommand.kt`：聚合 DOWN/MOVE/UP 注入结果。
-- 新增无障碍手势等待器，处理 completed/cancelled。
+新增：
+
+```text
+app/src/main/kotlin/li/songe/gkd/shizuku/InputSequenceResult.kt
+app/src/test/kotlin/li/songe/gkd/shizuku/InputSequenceResultTest.kt
+app/src/test/kotlin/li/songe/gkd/shizuku/SafeInvokeShizukuTest.kt
+```
+
+修改：
+
+- `GkdAction.kt`
+  - 新增 `ActionResultState`：`Accepted/Completed/Verified/Cancelled/Rejected/TimedOut`。
+  - `clickCenter`、`longClickCenter`、`swipe` 不再用 `dispatchGesture(...) != null` 判断成功；Root 成功标记 `Completed`，回退手势等待系统回调。
+  - `Verified` 只预留给后续界面复核，禁止由 API 接受或手势完成自动推断。
+- `A11yService.kt`
+  - 新增 `dispatchGestureAwait()` 和 `GestureDispatchResult`，区分完成、取消、提交拒绝和有界超时。
+- `InputManager.kt`、`ShizukuApi.kt`
+  - `compatInjectInputEvent/tap/swipe/key` 逐级返回隐藏 API 的真实 Boolean；Shizuku 关闭、Binder 尚未收到或远端 Binder 异常时返回 `false`，删除 `Unit != null` 假成功。
+- `InputShellCommand.kt`、`InputSequenceResult.kt`
+  - tap、swipe、key 的 DOWN/MOVE/UP 逐步聚合；DOWN 失败立即停止，MOVE 失败后仍发送 UP 收尾但保持失败，UP 失败也返回失败；MotionEvent 注入后及时 recycle。
+- `A11yRuleEngine.kt`
+  - 动作诊断详情增加 `state`；取消/超时使用 `ActionCancelled`，其余失败使用 `ActionRejected`。
+  - 返回键输入不再把非 null Boolean 当成功；只有 `true` 才停止回退。
+- `AdvancedPage.kt`
+  - 诊断文件通过 `Dispatchers.IO` 写入，写入异常由 `launchTry` 记录并提示，不再阻塞或直接冲击 Compose 点击回调。
 
 必须保留：
 
 - 现有动作字符串和默认动作选择。
 - 只有真实成功才调用 `rule.trigger()`。
 - 失败动作不消耗次数、不进入冷却。
+- `ActionResult.result` 保持现有字段，订阅 JSON、动作字符串、默认动作和 HTTP 检查协议只增加向后兼容的 `state` 输出。
+
+上游迁移方法：
+
+1. 如果上游已为 `dispatchGesture` 增加 suspend 等待器，优先采用上游生命周期实现，但必须保留 completed/cancelled/rejected/timeout 四种结果。
+2. 重新检查 `IInputManager.injectInputEvent*` 的返回类型；不得把 nullable wrapper 或 `Unit` 当成功。
+3. 若上游重写输入序列，逐项确认 DOWN/MOVE/UP 失败是粘性的，并在中途 MOVE 失败后仍安全发送 UP。
+4. `rule.trigger()` 必须继续位于可信成功分支内；合并冲突时禁止移动到动作提交之后。
+
+当前验收：
+
+- App Debug 单元测试新增 3 项输入序列测试，覆盖全成功、DOWN 失败及 MOVE 失败后成功 UP 不得覆盖失败；最终 App 测试 16/16、Selector JVM 测试 18/18、Release 构建和 lintVital 均通过。
+- Xiaomi Android 16 / KernelSU + Sui：Root `clickCenter` 与 350ms `swipe` 均返回 `result=true, shell=true, state=Completed`。
+- 非清数据覆盖安装后设置和 3 个订阅文件哈希保持不变。
+- 最终 APK SHA-256 `7841DEA509997085D350C867D38591AFF3220EA66FD31B73EB330A24AA3E5CE8`，3,320,183 字节；最终覆盖安装后 Root UserService UID `0`，零新增 GKD `AndroidRuntime`。
+- 临时关闭 Shizuku 输入并切换到系统无障碍服务后，两个重叠手势得到首个 `Cancelled`、第二个 `Completed`，证明 `GestureResultCallback` 分支来自系统真实回调。
+- 临时内存规则 `-1/app/9902/0` 的关联 ID `889` 记录 `ActionSubmitted → ActionCancelled(state=Cancelled)`；动作计数前后不变，随后仍为 `RuleEligible`，没有消耗 `actionMaximum` 或 `actionCd`。
+- 测试后内存订阅自动删除，动作计数扣回测试成功对照值，Root/自动化配置、系统无障碍设置和四个配置/订阅哈希全部恢复。
+- 隐藏输入 API 的逐事件 false 聚合由 JVM 测试覆盖；真机没有修改 `/system/bin/input`，也没有为生产 APK增加故障注入后门。
 
 上游合并时搜索：
 
@@ -1162,14 +1207,13 @@ common/gkd.apk
 
 ## 18. 当前工作区待办
 
-截至本文建立时：
+截至 2026-07-14：
 
-- `docs/root-runtime-refactor-plan.md` 已创建，尚未提交。
-- `docs/upstream-code-delta-guide.md` 已创建，尚未提交。
-- `README.md` 已增加开发路线入口，尚未提交。
-- `docs/testing/root-runtime-baseline.md` 和 `scripts/capture-root-runtime-baseline.ps1` 已建立，固化了当前 HEAD 的开发 APK、签名、规则/窗口复现表和 ADB 证据采集方式。
-- 阶段 0 状态为 `进行中`；Root 真机已完成升级前后快照、原地升级、App 自带备份恢复和规则样本选择，10 条规则重复统计、窗口场景和两个核心故障案例尚未验收。
-- Root 加强版运行时代码尚未开始，现有规则执行逻辑没有变化。
-- 下一开发步骤仍是完成主计划阶段 0 的真机复现集；不得因采集工具已经完成而跳过真机基线。
+- 当前 HEAD 为 `d33249d1`；阶段 2 代码、诊断导出、测试脚本和本轮文档仍在工作区，尚未提交。
+- 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
+- 阶段 1 的结构化诊断实现已完成，状态继续保持“进行中”，用于等待米游社等真实 B01/B02 漏执行现场。
+- 当前 Release APK SHA-256 为 `B83171CD124BD7ED27043CCD221D3DDB622018FA7E8362947DBBE513F6E0A548`，3,320,183 字节；App 测试 17/17、Selector 测试 18/18、Release 和 lintVital 均通过。该 APK 已非清数据覆盖安装：主进程 PID `28892`，Root UserService PID `10058`、UID 0，设置/订阅哈希及动作计数不变，无新增 GKD `AndroidRuntime`。
+- 真机已恢复 Root/自动化原配置：Root UserService UID 0，临时 HTTP 服务和 `-1` 内存订阅已清除，动作计数及四个配置/订阅哈希回到测试前值。
+- 下一编码步骤为阶段 3 查询唤醒状态机；阶段 0/1 的长期现场采样继续并行保留，不得遗忘补录。
 
-本文档的下一次更新应发生在阶段 0 收集到具体设备、规则样本、日志路径和基线结果之后，或基线 commit/签名发生变化时。
+最新整体状态以 [`current-progress.md`](current-progress.md) 为入口；本文仍负责记录每项代码级差异和未来上游迁移方法。

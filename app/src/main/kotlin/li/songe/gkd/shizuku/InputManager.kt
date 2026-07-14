@@ -19,18 +19,18 @@ class SafeInputManager(private val value: IInputManager) {
     fun compatInjectInputEvent(
         ev: InputEvent,
         mode: Int,
-    ) = safeInvokeShizuku {
+    ): Boolean = safeInvokeShizuku {
         if (AndroidTarget.TIRAMISU) {
             // https://github.com/android-cs/16/blob/main/core/java/android/hardware/input/InputManagerGlobal.java#L1707
             value.injectInputEventToTarget(ev, mode, android.os.Process.INVALID_UID)
         } else {
             value.injectInputEvent(ev, mode)
         }
-    }
+    } == true
 
     @WorkerThread
-    fun tap(x: Float, y: Float, duration: Long = 0) {
-        if (duration > 0) {
+    fun tap(x: Float, y: Float, duration: Long = 0): Boolean {
+        return if (duration > 0) {
             command.runSwipe(x, y, x, y, duration)
         } else {
             command.runTap(x, y)
@@ -38,9 +38,8 @@ class SafeInputManager(private val value: IInputManager) {
     }
 
     @WorkerThread
-    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long) {
+    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long): Boolean =
         command.runSwipe(x1, y1, x2, y2, duration)
-    }
 
     fun key(keyCode: Int) = command.runKeyEvent(keyCode)
 

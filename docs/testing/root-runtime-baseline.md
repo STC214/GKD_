@@ -346,16 +346,55 @@ App 自带导入结果：
 - `ExposeService` 改用有界的 `shortService` 前台类型，不再依赖特殊用途前台服务 AppOp，并始终按前台服务契约调用 `startForeground()`。
 - 诊断缓冲增加 revision，弹窗对成功记录、缓存数量和清空操作实时刷新。
 
-本轮最终 `:app:testGkdDebugUnitTest` 13/13、`:selector:jvmTest` 18/18、`:app:assembleGkdRelease` 通过。13 项 App 测试包含 3 项连接回调竞态和 1 项连续事件合并回归。最终 APK SHA-256 为 `AC4D66E4FAD64606946C9E9251DCDAC8F215B66DC2CCA4C49E9CF62CDDB764B6`，3,303,799 字节。以下项目仍需真机故障注入，未完成前不得把本节写成全部通过：
+本轮最终 `:app:testGkdDebugUnitTest` 13/13、`:selector:jvmTest` 18/18、`:app:assembleGkdRelease` 通过。13 项 App 测试包含 3 项连接回调竞态和 1 项连续事件合并回归。带日志目录导出的最终 APK SHA-256 为 `A606F46CBF74458FDEEB34223B60C27FF19BAC76472058C3A913BEC835D8E86A`，3,303,799 字节。
 
 同日已在原 Xiaomi Android 16 设备完成非清数据覆盖安装和正常路径冒烟：安装成功，主进程启动，StatusService 保持前台，Root UserService PID `14641`、UID `0`；正常权限下外部 `ExposeService(expose=-1)` 启动后按预期自行结束，无新增 `AndroidRuntime`。`store.json` 与 `-2.json`、`666.json`、`667.json` 的 SHA-256 均与安装前一致。
 
 特殊用途 AppOp 故障注入首轮发现：仅在 `onCreate()` 中检测失败并 `stopSelf()`，Android 16 仍抛出一次 `ForegroundServiceDidNotStartInTimeException`，且快照数量保持 2，证明请求未执行但前台契约仍未满足。最终将 ExposeService 改为 Manifest `shortService` 并重新覆盖安装；AppOp 明确保持 `ignore` 时再次调用 `expose=0`，快照数量由 2 增至 3，ExposeService 按预期结束，logcat 无新增崩溃。测试后 AppOp 已恢复为 `allow`。
 
-两次使用 `SIGSTOP/SIGCONT` 可逆暂停 Sui 的尝试均未命中 UserService 内部三秒超时：应用会等待 Sui Binder 恢复后才进入 `buildServiceWrapper()`。暂停期间和恢复后均无新增崩溃，Root UserService 可重新以 UID 0 建立。为避免继续破坏系统级 Sui，超时/迟到回调改由 3 项 JVM 测试直接覆盖“取消后迟到值必须释放、只能完成一次、取消后失败不得恢复”；真实三秒超时仍保留为待测，不把安全暂停结果冒充超时通过。
+两次使用 `SIGSTOP/SIGCONT` 可逆暂停 Sui 的尝试均未命中 UserService 内部三秒超时：应用会等待 Sui Binder 恢复后才进入 `buildServiceWrapper()`。随后改为仅暂停下一次 GKD Root UserService，成功命中真实三秒超时；系统级 Sui 全程不再受影响。3 项 JVM 测试继续覆盖“取消后迟到值必须释放、只能完成一次、取消后失败不得恢复”。
 
 包含上述测试驱动重构的最终 APK 已再次非清数据覆盖安装：主进程 PID `4548`，Root UserService PID `15788`、UID `0`，StatusService 为前台，特殊用途 AppOp 为 `allow`；设置和 3 个订阅哈希继续保持不变。随后正常调用 `ExposeService(expose=-1)`，无新增 `AndroidRuntime`。
 
-- 制造 UserService 首次连接超时，确认最多有限重连且无残留 `shizuku-user-service` 进程。
-- 重连进行中关闭 Shizuku 优化，确认后续尝试立即终止。
-- 高频打开哔哩哔哩并导出诊断，确认不存在只有 `EventReceived` 的限流/合并孤立 ID。
+- [x] UserService 首次连接超时：PID `17466` 被暂停 4.5 秒，在 3.001 秒记录 `connection cancelled`；attempt `2/3` 成功，旧 PID 消失，无残留进程和崩溃。
+- [x] 重连进行中关闭 Shizuku：连续暂停 PID `22856`、`23210`，第二次连接中关闭优化；恢复后没有第三次尝试、没有 Root UserService 残留，重新开启后 UID 0 服务恢复。
+- [x] 哔哩哔哩高频诊断：导出 740 条记录、200 个 ID；31 个事件型 ID 中哔哩哔哩占 25 个，孤立 `EventReceived` 为 0；1 个 `coalesced>1` 的 ID 有后续记录。
+
+后续复测可在弹窗点击“导出到日志目录”，拉取 `/sdcard/Android/data/li.songe.gkd/files/log/decision-diagnostics.txt` 后执行：
+
+```powershell
+.\scripts\analyze-decision-diagnostics.ps1 -Path .\decision-diagnostics.txt -TargetAppId tv.danmaku.bili
+```
+
+脚本发现任意只有 `EventReceived` 的关联 ID 时返回非零退出码。
+
+## 13. 阶段 2 动作结果真机记录
+
+2026-07-14 在同一 Xiaomi Android 16 / KernelSU + Sui 设备上非清数据覆盖安装阶段 2 工作版：
+
+- Root UserService 进程 UID 为 `0`；通过 GKD 自身 HTTP 检查接口在哔哩哔哩节点树执行 `clickCenter`，返回 `{"action":"clickCenter","result":true,"shell":true,"state":"Completed"}`。
+- 对 `story_bottom_pager` 执行 350ms `swipe`，返回 `{"action":"swipe","result":true,"shell":true,"state":"Completed"}`，真实界面发生滚动。
+- `SafeInputManager.compatInjectInputEvent()` 现在只在隐藏输入 API 返回 `true` 时成功；DOWN 失败立即终止，MOVE 失败会保持整次失败但仍发送 UP 收尾，UP 失败同样判整次失败。
+- 无障碍点击、长按和滑动改为等待 `GestureResultCallback`；只有 `onCompleted` 成功，`onCancelled`、提交拒绝和超时均失败。
+- `A11yRuleEngine` 仍只在 `actionResult.result` 为真时调用 `rule.trigger()`；失败状态使用稳定的 `ActionRejected` 或 `ActionCancelled` 诊断原因，不增加次数、不进入冷却。
+- 节点 `performAction()` 和全局返回键只能标记 `Accepted`，Root/输入序列和无障碍完成回调标记 `Completed`；`Verified` 仅为后续界面复核预留，本阶段没有把动作接受或完成等同于界面结果验证。
+- 覆盖安装后 `store.json`、`-2.json`、`666.json`、`667.json` 的 SHA-256 与安装前完全一致。
+- 最终 App Debug 单元测试 16/16、Selector JVM 测试 18/18、Release 构建和 lintVital 均通过；最终 APK SHA-256 为 `7841DEA509997085D350C867D38591AFF3220EA66FD31B73EB330A24AA3E5CE8`，3,320,183 字节。
+- 最终 APK 再次原地安装后，主进程 PID `15075`，Root UserService PID `27651`、UID `0`，清空 logcat 后启动无新增 `AndroidRuntime`。
+
+随后完成无障碍取消和规则消费故障注入：
+
+- 测试前备份 `store.json`，临时设置 `automatorMode=1`、`enableShizuku=false`，由系统绑定 GKD `SelectToSpeakService`；此时不存在 Root UserService，动作只能经过无障碍手势路径。
+- 同一进程向 HTTP 检查接口异步提交 5 秒与 250ms 两个重叠手势，第二个请求在 452ms 发出；首个结果为 `result=false, state=Cancelled`，第二个为 `result=true, state=Completed`。
+- 启用临时内存订阅规则 `-1/app/9902/0` 后，用连续短手势取消其 5 秒动作。关联 ID `889` 在 383ms 内形成 `ActionSubmitted → ActionCancelled`，详情为 `action=swipe, state=Cancelled`。
+- 此次规则级取消前后 `action_count.txt` 均为 `7705`；后续同一规则重新出现 `RuleEligible`，没有 `ActionMaximumReached` 或 `CooldownActive`，证明失败没有消费次数和冷却。
+- 停止 HTTP 服务后 `-1.json` 自动删除；测试产生的两次成功对照动作已从动作计数中扣回，最终恢复为测试前的 `7703`。
+- 最终恢复原 `store.json`、空的 enabled accessibility service 列表和 `accessibility_enabled=1`；Root UserService 重新上线且 UID 为 `0`。四个配置/订阅 SHA-256 与测试前一致，无新增 GKD `AndroidRuntime`。
+
+阶段 2 验收完成。隐藏输入 API 的逐事件 `false` 聚合由 3 项 JVM 测试覆盖；真机采用系统真实 `onCancelled` 验证规则失败分支，未通过修改系统 `/system/bin/input` 或注入生产测试后门制造风险更高的权限故障。
+
+### 13.1 阶段 2 审查收口复测
+
+同日完成动作结果代码审查后的两项收口：`safeInvokeShizuku()` 将远端 `RemoteException` 转换为不可用结果，输入动作可继续走失败/回退路径；诊断文件改由 `Dispatchers.IO` 写入，写入异常交给 `launchTry` 记录和提示。新增 1 项 Binder 异常 JVM 回归后，App Debug 单元测试为 17/17，Selector JVM 测试为 18/18，Release 与 lintVital 通过。
+
+最终 APK SHA-256 为 `B83171CD124BD7ED27043CCD221D3DDB622018FA7E8362947DBBE513F6E0A548`，3,320,183 字节。非清数据覆盖安装成功，主进程 PID `28892`，Root UserService PID `10058`、UID `0`；安装前后 `store.json`、`-2.json`、`666.json`、`667.json` 的 SHA-256 完全一致，`action_count.txt` 保持 `7703`，清空 logcat 后无新增 GKD `AndroidRuntime`。

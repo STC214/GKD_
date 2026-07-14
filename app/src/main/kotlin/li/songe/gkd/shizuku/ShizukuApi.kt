@@ -4,6 +4,7 @@ package li.songe.gkd.shizuku
 import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
+import android.os.RemoteException
 import androidx.annotation.WorkerThread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -38,6 +39,9 @@ inline fun <T> safeInvokeShizuku(
 ): T? = try {
     block()
 } catch (_: ShizukuOffException) {
+    null
+} catch (e: RemoteException) {
+    e.printStackTrace()
     null
 } catch (e: IllegalStateException) {
     // https://github.com/RikkaApps/Shizuku-API/blob/a27f6e4151ba7b39965ca47edb2bf0aeed7102e5/api/src/main/java/rikka/shizuku/Shizuku.java#L430
@@ -142,17 +146,17 @@ class ShizukuContext(
 
     @WorkerThread
     fun tap(x: Float, y: Float, duration: Long = 0): Boolean {
-        return serviceWrapper?.tap(x, y, duration) ?: (inputManager?.tap(x, y, duration) != null)
+        return serviceWrapper?.tap(x, y, duration) ?: inputManager?.tap(x, y, duration) ?: false
     }
 
     fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long): Boolean {
-        return serviceWrapper?.swipe(x1, y1, x2, y2, duration) ?: (inputManager?.swipe(
+        return serviceWrapper?.swipe(x1, y1, x2, y2, duration) ?: inputManager?.swipe(
             x1,
             y1,
             x2,
             y2,
             duration
-        ) != null)
+        ) ?: false
     }
 
     fun getTasks(maxNum: Int = 1): List<ActivityManager.RunningTaskInfo> {

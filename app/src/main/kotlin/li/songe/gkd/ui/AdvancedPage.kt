@@ -50,6 +50,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import com.dylanc.activityresult.launcher.launchForResult
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
 import li.songe.gkd.MainActivity
@@ -93,6 +94,8 @@ import li.songe.gkd.util.appInfoMapFlow
 import li.songe.gkd.util.copyText
 import li.songe.gkd.util.format
 import li.songe.gkd.util.launchAsFn
+import li.songe.gkd.util.launchTry
+import li.songe.gkd.util.logFolder
 import li.songe.gkd.util.throttle
 import li.songe.gkd.util.toast
 import li.songe.selector.Selector
@@ -276,6 +279,18 @@ fun AdvancedPage() {
                             textDecoration = TextDecoration.Underline,
                             modifier = Modifier.clickable {
                                 decisionTraceBuffer.clear()
+                            },
+                        )
+                        Text(
+                            text = "导出到日志目录",
+                            color = MaterialTheme.colorScheme.primary,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier.clickable {
+                                mainVm.viewModelScope.launchTry(Dispatchers.IO) {
+                                    logFolder.resolve("decision-diagnostics.txt")
+                                        .writeText(decisionTraceBuffer.exportText())
+                                    toast("已导出 decision-diagnostics.txt")
+                                }
                             },
                         )
                     }

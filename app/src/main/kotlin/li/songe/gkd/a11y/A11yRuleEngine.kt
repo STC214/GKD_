@@ -21,6 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import li.songe.gkd.META
 import li.songe.gkd.data.ActionPerformer
 import li.songe.gkd.data.ActionResult
+import li.songe.gkd.data.ActionResultState
 import li.songe.gkd.data.AppRule
 import li.songe.gkd.data.GkdAction
 import li.songe.gkd.data.ResolvedRule
@@ -632,7 +633,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     DecisionOutcome.Succeeded,
                     DecisionReason.ActionSucceeded,
                     rule,
-                    "action=${actionResult.action}",
+                    "action=${actionResult.action}, state=${actionResult.state}",
                 )
                 val topActivity = topActivityFlow.value
                 rule.trigger()
@@ -649,9 +650,14 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     decisionId,
                     DecisionStage.Action,
                     DecisionOutcome.Failed,
-                    DecisionReason.ActionRejected,
+                    when (actionResult.state) {
+                        ActionResultState.Cancelled,
+                        ActionResultState.TimedOut -> DecisionReason.ActionCancelled
+
+                        else -> DecisionReason.ActionRejected
+                    },
                     rule,
-                    "action=${actionResult.action}",
+                    "action=${actionResult.action}, state=${actionResult.state}",
                 )
             }
         }
@@ -689,7 +695,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
 
         fun performActionBack(): Boolean {
             val r1 = shizukuContextFlow.value.inputManager?.key(KeyEvent.KEYCODE_BACK)
-            if (r1 != null) return true
+            if (r1 == true) return true
             return A11yService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) == true
         }
 

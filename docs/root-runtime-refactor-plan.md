@@ -4,6 +4,8 @@
 
 本文档用于指导本 fork 在不开发 LSPosed 模块、不依赖额外刷入式功能模块的前提下，利用 root 权限改进 GKD 的窗口判断、规则调度和动作执行可靠性。
 
+当前阶段、构建产物和真机状态统一汇总在 [`current-progress.md`](current-progress.md)，本文继续作为实施顺序和验收标准的唯一主计划。
+
 后续开发必须按本文阶段顺序推进。每一阶段只有在完成对应验收、记录测试结果并保留可回滚点后，才能进入下一阶段。
 
 ## 2. 最终目标
@@ -184,6 +186,7 @@ RootActionExecutor
   - 动作被拒绝、取消或验证失败。
 - [x] 在高级设置提供“最近一次未执行原因”、最近 30 条预览、全部记录复制和内存清空。
 - [x] 诊断弹窗按缓冲 revision 实时刷新成功记录、缓存数量和清空结果。
+- [x] 支持将完整诊断导出为应用日志目录中的 `decision-diagnostics.txt`，供 ADB 和后续现场脚本读取。
 - [x] 默认关闭高频诊断；关闭时不分配关联 ID，逐规则记录入口立即返回。
 
 验收：
@@ -200,19 +203,21 @@ RootActionExecutor
 
 任务：
 
-- [ ] 将 `dispatchGesture(...) != null` 改为真实 Boolean 结果判断。
-- [ ] 使用 `GestureResultCallback` 区分 `onCompleted` 和 `onCancelled`。
-- [ ] 让 `SafeInputManager` 和 `InputShellCommand` 返回每次注入的真实结果，不再返回无条件 `Unit` 成功。
-- [ ] DOWN、MOVE、UP 任一关键事件失败时，整个动作判为失败。
-- [ ] 动作失败时不得调用 `rule.trigger()`，不得增加次数或进入冷却。
-- [ ] 区分“节点动作已接受”“手势已完成”“界面结果已验证”三种状态。
-- [ ] 保持现有动作名称和规则格式不变。
+- [x] 将 `dispatchGesture(...) != null` 改为等待真实手势结果。
+- [x] 使用 `GestureResultCallback` 区分 `onCompleted`、`onCancelled`、提交拒绝和等待超时。
+- [x] 让 `SafeInputManager` 和 `InputShellCommand` 返回每次注入的真实结果，不再返回无条件 `Unit` 成功。
+- [x] DOWN、MOVE、UP 任一关键事件失败时，整个动作判为失败。
+- [x] 动作失败时不得调用 `rule.trigger()`，不得增加次数或进入冷却。
+- [x] 用 `ActionResultState` 区分“节点/API 已接受”“输入/手势已完成”和预留的“界面结果已验证”；本阶段不把前两者冒充界面验证。
+- [x] 保持现有动作名称和规则格式不变。
 
 验收：
 
 - 人为让手势注入失败时，动作日志明确显示失败，规则次数不增加。
 - 手势取消时不进入 `actionCd`。
 - 原有成功动作仍能执行，动作日志与实际界面一致。
+
+当前实现结果：Root UserService 的 `clickCenter` 和 `swipe` 已通过 HTTP 检查接口在哔哩哔哩真机执行，均返回 `result=true, shell=true, state=Completed`；动作名、选择器和 `swipeArg` 格式未变化。JVM 回归覆盖 MOVE 失败后成功 UP 不能覆盖整次失败。真机临时切换到无障碍模式并关闭 Shizuku 输入后，重叠手势稳定得到 `Cancelled → Completed`；临时内存规则 `-1/app/9902/0` 的诊断链为 `ActionSubmitted → ActionCancelled(state=Cancelled)`，动作计数前后不变，随后规则仍为 `RuleEligible`，证明没有消耗次数或进入冷却。测试后配置、动作计数、无障碍设置和订阅已原样恢复。
 
 ### 阶段 3：重构查询唤醒，消除丢事件窗口
 
@@ -440,7 +445,7 @@ test(phase-9): ...
 | 0. 兼容基线与复现集 | 进行中 | Root 真机、升级前后快照、当前 HEAD 原地升级、App 自带备份恢复和 10 条真实规则样本已建立；等待规则重复统计、窗口场景与两个核心故障复现，见 `docs/testing/root-runtime-baseline.md`。 |
 | 0.5 Root 桥真实性与自恢复 | 已完成 | Root UserService UID 0、系统 Binder 8/8、UiAutomation 共存、有限重连、手动检测、订阅哈希和通知权限拒绝下的外部冷启动均已真机验收。 |
 | 1. 决策诊断 | 进行中 | 结构化枚举、关联 ID、2048 条内存环形缓冲、规则引擎关键分支、高级设置预览/复制和哔哩哔哩真机链路已完成；等待 B01/B02 有效现场。 |
-| 2. 动作结果误判修复 | 未开始 | |
+| 2. 动作结果误判修复 | 已完成 | Root 完成路径、无障碍取消路径、失败不计次数/冷却和订阅不变量均已验收。 |
 | 3. 查询唤醒重构 | 未开始 | |
 | 4. 前台与焦点窗口融合 | 未开始 | |
 | 5. 窗口与节点恢复 | 未开始 | |
