@@ -18,6 +18,8 @@ import li.songe.gkd.util.componentName
 import rikka.shizuku.Shizuku
 import java.io.DataOutputStream
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.system.exitProcess
 
@@ -197,26 +199,32 @@ suspend fun buildServiceWrapper(): UserServiceConnectionResult {
         .version(META.versionCode)
         .tag("default")
     LogUtils.d("buildServiceWrapper", serviceArgs)
-    var resumeCallback: ((UserServiceWrapper) -> Unit)? = null
-    var failure = UserServiceFailure.Timeout
-    var error: String? = null
-    val connection = object : ServiceConnection {
+    val callbackGate = ConnectionCallbackGate<UserServiceWrapper>(UserServiceWrapper::destroy)
+    val failure = AtomicReference(UserServiceFailure.Timeout)
+    val error = AtomicReference<String?>(null)
+    val bindingReleased = AtomicBoolean(false)
+    lateinit var connection: ServiceConnection
+    fun releaseBinding(reason: String?) {
+        if (bindingReleased.compareAndSet(false, true)) {
+            unbindUserService(serviceArgs, connection, reason)
+        }
+    }
+    connection = object : ServiceConnection {
         override fun onServiceConnected(componentName: ComponentName, binder: IBinder?) {
             LogUtils.d("onServiceConnected", componentName)
-            resumeCallback ?: return
             if (binder?.pingBinder() == true) {
-                resumeCallback?.invoke(
-                    UserServiceWrapper(
-                        IUserService.Stub.asInterface(binder),
-                        this,
-                        serviceArgs
-                    )
+                val wrapper = UserServiceWrapper(
+                    IUserService.Stub.asInterface(binder),
+                    this,
+                    serviceArgs,
                 )
-                resumeCallback = null
+                callbackGate.complete(wrapper)
             } else {
-                failure = UserServiceFailure.InvalidBinder
-                error = "invalid binder for $componentName"
-                LogUtils.d("invalid binder for $componentName received")
+                callbackGate.fail {
+                    failure.set(UserServiceFailure.InvalidBinder)
+                    error.set("invalid binder for $componentName")
+                    LogUtils.d("invalid binder for $componentName received")
+                }
             }
         }
 
@@ -226,28 +234,41 @@ suspend fun buildServiceWrapper(): UserServiceConnectionResult {
     }
     val wrapper = withTimeoutOrNull(3000) {
         suspendCancellableCoroutine { continuation ->
-            resumeCallback = { continuation.resume(it) }
+            callbackGate.arm { connectedWrapper ->
+                if (connectedWrapper == null) {
+                    continuation.resume(null)
+                } else {
+                    continuation.resume(connectedWrapper) { _, abandonedWrapper, _ ->
+                        abandonedWrapper.destroy()
+                    }
+                }
+            }
+            continuation.invokeOnCancellation {
+                callbackGate.cancel()
+                releaseBinding("connection cancelled")
+            }
             try {
                 Shizuku.bindUserService(serviceArgs, connection)
             } catch (e: Throwable) {
-                failure = UserServiceFailure.BindException
-                error = e.message ?: e::class.java.simpleName
-                resumeCallback = null
-                continuation.resume(null)
+                failure.set(UserServiceFailure.BindException)
+                error.set(e.message ?: e::class.java.simpleName)
+                callbackGate.fail()
             }
         }
     }
     if (wrapper == null) {
-        val reason = when (failure) {
-            UserServiceFailure.BindException -> "bind exception: $error"
-            UserServiceFailure.InvalidBinder -> error
+        val failureValue = failure.get()
+        val errorValue = error.get()
+        val reason = when (failureValue) {
+            UserServiceFailure.BindException -> "bind exception: $errorValue"
+            UserServiceFailure.InvalidBinder -> errorValue
             UserServiceFailure.Timeout -> "connect timeout"
         }
-        unbindUserService(serviceArgs, connection, reason)
+        releaseBinding(reason)
     }
     return UserServiceConnectionResult(
         wrapper = wrapper,
-        failure = failure.takeIf { wrapper == null },
-        error = error,
+        failure = failure.get().takeIf { wrapper == null },
+        error = error.get(),
     )
 }

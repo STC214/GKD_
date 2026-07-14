@@ -82,12 +82,16 @@ class ShizukuContext(
     val wmManager: SafeWindowManager?,
 ) {
     @Volatile
+    private var destroyed = false
+
+    @Volatile
     var serviceWrapper: UserServiceWrapper? = serviceWrapper
         private set
 
     val ok get() = this !== defaultShizukuContext
     fun destroy() {
         val oldServiceWrapper = synchronized(this) {
+            destroyed = true
             serviceWrapper.also { serviceWrapper = null }
         }
         oldServiceWrapper?.destroy()
@@ -113,7 +117,7 @@ class ShizukuContext(
 
     fun installServiceWrapper(wrapper: UserServiceWrapper): Boolean {
         synchronized(this) {
-            if (serviceWrapper != null) return false
+            if (destroyed || serviceWrapper != null) return false
             serviceWrapper = wrapper
         }
         onServiceWrapperReady(wrapper)
@@ -280,6 +284,10 @@ fun retryRootUserService(manual: Boolean = true) = rootBridgeReconnectMutex.laun
     }
     val maxAttempts = AUTO_ROOT_RECONNECT_ATTEMPTS + 1
     repeat(AUTO_ROOT_RECONNECT_ATTEMPTS) { index ->
+        if (!shizukuUsedFlow.value || shizukuContextFlow.value !== context) {
+            updateRootBridgeDiagnostics(shizukuContextFlow.value)
+            return@launchTry
+        }
         val attempt = index + 2
         updateRootBridgeDiagnostics(
             context = context,
@@ -288,10 +296,19 @@ fun retryRootUserService(manual: Boolean = true) = rootBridgeReconnectMutex.laun
             checking = true,
         )
         if (index > 0) delay(1000)
+        if (!shizukuUsedFlow.value || shizukuContextFlow.value !== context) {
+            updateRootBridgeDiagnostics(shizukuContextFlow.value)
+            return@launchTry
+        }
         val result = buildServiceWrapper()
         val wrapper = result.wrapper
+        if (!shizukuUsedFlow.value || shizukuContextFlow.value !== context) {
+            wrapper?.destroy()
+            updateRootBridgeDiagnostics(shizukuContextFlow.value)
+            return@launchTry
+        }
         if (wrapper != null) {
-            if (shizukuContextFlow.value === context && context.installServiceWrapper(wrapper)) {
+            if (context.installServiceWrapper(wrapper)) {
                 updateRootBridgeDiagnostics(
                     context = context,
                     attempt = attempt,

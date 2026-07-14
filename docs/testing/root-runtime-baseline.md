@@ -335,3 +335,27 @@ App 自带导入结果：
 - GKD 自身零规则现在记录为 `NoApplicableRules/Observed`，不再覆盖目标应用最近失败。最终最近失败显示“包名或 Activity 不匹配”，应用为 `com.miui.securitycenter`，详情为 `foreground=tv.danmaku.bili`，与应用启动过渡现场相符。
 - 最终 App Debug 单元测试 8/8、Release 构建、Root UserService UID 0、StatusService 前台状态和零新增崩溃均通过；3 个订阅文件 SHA-256 保持阶段 0 基线值。
 - 本阶段没有修改 `rule.trigger()`、规则状态计算、选择器、动作实现、延迟或查询唤醒算法；B01/B02 仍需有效现场才能验收“每次漏执行均有准确终止原因”。
+
+## 12. 代码审查修复与待回归项
+
+2026-07-14 对阶段 0.5/1 提交进行代码审查后完成以下收口：
+
+- UserService 连接回调改为原子领取；超时或取消时撤销回调并解绑，迟到 wrapper 立即销毁。
+- Root 重连在每轮开始、延迟后和连接返回后重新确认 Shizuku 仍启用且上下文未变化；已销毁上下文永久拒绝安装 wrapper。
+- 无障碍事件关联 ID 改为在既有限流和连续事件合并后生成；事件队列不再误删非连续的同类事件。
+- `ExposeService` 改用有界的 `shortService` 前台类型，不再依赖特殊用途前台服务 AppOp，并始终按前台服务契约调用 `startForeground()`。
+- 诊断缓冲增加 revision，弹窗对成功记录、缓存数量和清空操作实时刷新。
+
+本轮最终 `:app:testGkdDebugUnitTest` 13/13、`:selector:jvmTest` 18/18、`:app:assembleGkdRelease` 通过。13 项 App 测试包含 3 项连接回调竞态和 1 项连续事件合并回归。最终 APK SHA-256 为 `AC4D66E4FAD64606946C9E9251DCDAC8F215B66DC2CCA4C49E9CF62CDDB764B6`，3,303,799 字节。以下项目仍需真机故障注入，未完成前不得把本节写成全部通过：
+
+同日已在原 Xiaomi Android 16 设备完成非清数据覆盖安装和正常路径冒烟：安装成功，主进程启动，StatusService 保持前台，Root UserService PID `14641`、UID `0`；正常权限下外部 `ExposeService(expose=-1)` 启动后按预期自行结束，无新增 `AndroidRuntime`。`store.json` 与 `-2.json`、`666.json`、`667.json` 的 SHA-256 均与安装前一致。
+
+特殊用途 AppOp 故障注入首轮发现：仅在 `onCreate()` 中检测失败并 `stopSelf()`，Android 16 仍抛出一次 `ForegroundServiceDidNotStartInTimeException`，且快照数量保持 2，证明请求未执行但前台契约仍未满足。最终将 ExposeService 改为 Manifest `shortService` 并重新覆盖安装；AppOp 明确保持 `ignore` 时再次调用 `expose=0`，快照数量由 2 增至 3，ExposeService 按预期结束，logcat 无新增崩溃。测试后 AppOp 已恢复为 `allow`。
+
+两次使用 `SIGSTOP/SIGCONT` 可逆暂停 Sui 的尝试均未命中 UserService 内部三秒超时：应用会等待 Sui Binder 恢复后才进入 `buildServiceWrapper()`。暂停期间和恢复后均无新增崩溃，Root UserService 可重新以 UID 0 建立。为避免继续破坏系统级 Sui，超时/迟到回调改由 3 项 JVM 测试直接覆盖“取消后迟到值必须释放、只能完成一次、取消后失败不得恢复”；真实三秒超时仍保留为待测，不把安全暂停结果冒充超时通过。
+
+包含上述测试驱动重构的最终 APK 已再次非清数据覆盖安装：主进程 PID `4548`，Root UserService PID `15788`、UID `0`，StatusService 为前台，特殊用途 AppOp 为 `allow`；设置和 3 个订阅哈希继续保持不变。随后正常调用 `ExposeService(expose=-1)`，无新增 `AndroidRuntime`。
+
+- 制造 UserService 首次连接超时，确认最多有限重连且无残留 `shizuku-user-service` 进程。
+- 重连进行中关闭 Shizuku 优化，确认后续尝试立即终止。
+- 高频打开哔哩哔哩并导出诊断，确认不存在只有 `EventReceived` 的限流/合并孤立 ID。

@@ -241,7 +241,8 @@ fun AdvancedPage() {
     var showDecisionDiagnostics by vm.showDecisionDiagnosticsFlow.asMutableState()
     if (showDecisionDiagnostics) {
         val latestSkipped by decisionTraceBuffer.latestSkippedFlow.collectAsState()
-        val records = remember(latestSkipped) {
+        val diagnosticsRevision by decisionTraceBuffer.revisionFlow.collectAsState()
+        val records = remember(diagnosticsRevision) {
             decisionTraceBuffer.snapshot().takeLast(30).reversed()
         }
         AlertDialog(
@@ -255,7 +256,7 @@ fun AdvancedPage() {
                         text = if (store.enableRuleDiagnostics) "诊断已启用（仅内存）" else "诊断已关闭",
                         color = if (store.enableRuleDiagnostics) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text("缓存：${decisionTraceBuffer.snapshot().size}/2048")
+                    Text("缓存：${remember(diagnosticsRevision) { decisionTraceBuffer.snapshot().size }}/2048")
                     Text(
                         text = "最近未执行：${latestSkipped?.summary ?: "暂无记录"}",
                         style = MaterialTheme.typography.titleSmall,

@@ -17,6 +17,8 @@ class DecisionTraceBuffer(
     private val records = ArrayDeque<DecisionTrace>(capacity)
     private val _latestSkippedFlow = MutableStateFlow<DecisionTrace?>(null)
     val latestSkippedFlow = _latestSkippedFlow.asStateFlow()
+    private val _revisionFlow = MutableStateFlow(0L)
+    val revisionFlow = _revisionFlow.asStateFlow()
 
     fun newCorrelationId(): Long? = if (enabled()) nextId.incrementAndGet() else null
 
@@ -46,6 +48,7 @@ class DecisionTraceBuffer(
         )
         if (records.size == capacity) records.removeFirst()
         records.addLast(trace)
+        _revisionFlow.value++
         if (outcome == DecisionOutcome.Skipped || outcome == DecisionOutcome.Failed) {
             _latestSkippedFlow.value = trace
         }
@@ -59,6 +62,7 @@ class DecisionTraceBuffer(
     fun clear() {
         records.clear()
         _latestSkippedFlow.value = null
+        _revisionFlow.value++
     }
 
     fun exportText(): String {

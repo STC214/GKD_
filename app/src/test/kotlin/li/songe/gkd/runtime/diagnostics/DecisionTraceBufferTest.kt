@@ -86,4 +86,22 @@ class DecisionTraceBufferTest {
         assertNull(buffer.latestSkippedFlow.value)
         assertTrue(buffer.snapshot().isEmpty())
     }
+
+    @Test
+    fun `every append and clear advances ui revision`() {
+        val buffer = DecisionTraceBuffer(capacity = 2)
+        val initialRevision = buffer.revisionFlow.value
+        val id = buffer.newCorrelationId()
+
+        buffer.append(
+            correlationId = id,
+            stage = DecisionStage.Event,
+            outcome = DecisionOutcome.Observed,
+            reason = DecisionReason.EventReceived,
+        )
+        assertEquals(initialRevision + 1, buffer.revisionFlow.value)
+
+        buffer.clear()
+        assertEquals(initialRevision + 2, buffer.revisionFlow.value)
+    }
 }

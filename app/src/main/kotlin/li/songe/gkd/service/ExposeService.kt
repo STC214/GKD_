@@ -16,8 +16,16 @@ import li.songe.gkd.util.shFolder
 import li.songe.gkd.util.toast
 
 class ExposeService : Service() {
+    private var foregroundStarted = false
+
     override fun onBind(intent: Intent?): Binder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!foregroundStarted) {
+            LogUtils.d("ExposeService rejected: foreground service is unavailable")
+            toast("外部前台服务启动失败，调用未执行", forced = true)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         appScope.launchTry {
             try {
                 handleIntent(intent)
@@ -48,7 +56,10 @@ class ExposeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        exposeNotif.notifyService()
+        // ExposeService is a bounded command bridge. It uses the manifest
+        // shortService type and must not depend on the special-use AppOp.
+        foregroundStarted = exposeNotif.notifyService(requireSpecialUse = false)
+        if (!foregroundStarted) stopSelf()
     }
 
     companion object {

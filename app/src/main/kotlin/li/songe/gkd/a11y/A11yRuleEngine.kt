@@ -56,6 +56,12 @@ private val eventDispatcher = Executors.newSingleThreadExecutor().asCoroutineDis
 private val queryDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 private val actionDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
+internal fun <T> ArrayDeque<T>.removeMatchingPrefix(predicate: (T) -> Boolean): List<T> {
+    val prefix = takeWhile(predicate)
+    repeat(prefix.size) { removeFirst() }
+    return prefix
+}
+
 private val latestServiceMode = atomic(0)
 private val latestServiceTime = atomic(0L)
 
@@ -180,16 +186,6 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         if ((event.eventType == CONTENT_CHANGED || !isActivityVisible) && event.packageName == META.appId) return
 
         val a11yEvent = event.toA11yEvent() ?: return
-        val decisionId = decisionTraceBuffer.newCorrelationId()
-        traceDecision(
-            correlationId = decisionId,
-            stage = DecisionStage.Event,
-            outcome = DecisionOutcome.Observed,
-            reason = DecisionReason.EventReceived,
-            appId = a11yEvent.appId,
-            activityId = a11yEvent.name,
-            detail = "type=${a11yEvent.type}",
-        )
         if (a11yEvent.type == CONTENT_CHANGED) {
             // 防止 content 类型事件过快
             if (a11yEvent.time - lastContentEventTime < 100 && a11yEvent.time - appChangeTime > 5000 && a11yEvent.time - lastTriggerTime > 3000) {
@@ -214,18 +210,28 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             latestStateEvent = a11yEvent
         }
         synchronized(eventDeque) { eventDeque.addLast(a11yEvent) }
-        scope.launch(eventDispatcher) { consumeEvent(a11yEvent, decisionId) }
+        scope.launch(eventDispatcher) { consumeEvent(a11yEvent) }
     }
 
     private val queryEvents = mutableListOf<A11yEvent>()
-    private suspend fun consumeEvent(headEvent: A11yEvent, decisionId: Long?) {
+    private suspend fun consumeEvent(headEvent: A11yEvent) {
         val consumedEvents = synchronized(eventDeque) {
             if (eventDeque.firstOrNull() !== headEvent) return
-            eventDeque.filter { it.sameAs(headEvent) }.apply {
-                repeat(size) { eventDeque.removeFirst() }
-            }
+            // Only coalesce the contiguous prefix. Filtering the whole deque and
+            // then removing by count can accidentally discard interleaved events.
+            eventDeque.removeMatchingPrefix { it.sameAs(headEvent) }
         }
         val latestEvent = consumedEvents.last()
+        val decisionId = decisionTraceBuffer.newCorrelationId()
+        traceDecision(
+            correlationId = decisionId,
+            stage = DecisionStage.Event,
+            outcome = DecisionOutcome.Observed,
+            reason = DecisionReason.EventReceived,
+            appId = latestEvent.appId,
+            activityId = latestEvent.name,
+            detail = "type=${latestEvent.type} coalesced=${consumedEvents.size}",
+        )
         val evAppId = latestEvent.appId
         val evActivityId = latestEvent.name
         val oldAppId = topActivityFlow.value.appId

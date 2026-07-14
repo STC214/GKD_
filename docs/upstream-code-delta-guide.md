@@ -488,24 +488,31 @@ scripts/capture-window-scenario.ps1
 
 ```text
 app/src/main/kotlin/li/songe/gkd/shizuku/RootBridgeDiagnostics.kt
+app/src/main/kotlin/li/songe/gkd/shizuku/ConnectionCallbackGate.kt
 app/src/test/kotlin/li/songe/gkd/shizuku/RootBridgeDiagnosticsTest.kt
+app/src/test/kotlin/li/songe/gkd/shizuku/ConnectionCallbackGateTest.kt
 ```
 
 修改：
 
 - `shizuku/ShizukuApi.kt`
   - `ShizukuContext.serviceWrapper` 从构造期只读值改为线程可见、仅允许安装一次的可替换连接；其他系统 Binder 保持原实例。
+  - `ShizukuContext.destroy()` 设置不可逆的 `destroyed` 标记；已经销毁的上下文拒绝安装迟到 wrapper。
   - 新增 `rootBridgeDiagnosticsFlow`、`refreshRootBridgeDiagnostics()`、`retryRootUserService()`。
-  - 初次 UserService 失败后最多后台重试 2 次；上下文已变化或已有连接时销毁新建 wrapper，禁止旧连接串入新上下文。
+  - 初次 UserService 失败后最多后台重试 2 次；每轮开始、重试延迟后和连接返回后均重新检查 Shizuku 开关及上下文身份，上下文已变化时销毁新建 wrapper，禁止旧连接串入新上下文。
   - 只有远端 `id` 成功且 UID 为 0 时才分类为 `Root`；系统 Binder 可用但 UserService 缺失时分类为 `Partial/Failed`。
 - `shizuku/UserService.kt`
   - `buildServiceWrapper()` 返回 `UserServiceConnectionResult`，区分 `BindException`、`InvalidBinder` 和 `Timeout`。
+  - ServiceConnection 回调使用原子领取；超时/取消立即撤销回调并只执行一次主动解绑，取消后才到达的有效 wrapper 必须立即 `destroy()`，不得恢复已取消 continuation 或泄漏 Root 进程。
 - `ui/AdvancedPage.kt`
   - 原“授权状态”弹窗扩展为“Root 与授权状态”，显示系统 Binder 数量、UserService、远端 UID、Shell 自检、UiAutomation、连接尝试和失败原因。
   - 增加“重新连接/重新检测”按钮。
 - `notif/Notif.kt`
   - 不再用 `POST_NOTIFICATIONS` 的结果阻止 `startForeground()`。Android 13+ 即使拒绝通知权限也允许前台服务运行；旧逻辑会让 shell 通过 `startForegroundService()` 拉起 `ExposeService` 时触发 `ForegroundServiceDidNotStartInTimeException`。
   - 仍保留特殊用途前台服务 AppOp 检查；它与通知展示权限是两项独立能力。
+- `service/ExposeService.kt`
+  - 该服务是有界命令桥，Manifest 前台类型由 `specialUse` 改为 `shortService`；调用 `notifyService(requireSpecialUse=false)`，因此不再依赖特殊用途 AppOp，并且仍会在系统时限内进入前台。
+  - `notifyService()` 返回是否真正进入前台；无法进入前台时不执行请求，立即 `stopSelf()` 并返回 `START_NOT_STICKY`。
 
 不变量：
 
@@ -517,7 +524,7 @@ app/src/test/kotlin/li/songe/gkd/shizuku/RootBridgeDiagnosticsTest.kt
 上游迁移方法：
 
 1. 先确认上游是否已经把 UserService 与其余 Shizuku Binder 拆分状态；若已有等价能力，优先映射状态字段而不是保留两套重连器。
-2. 若上游更改 `Shizuku.UserServiceArgs` 或 ServiceConnection 生命周期，保留 `UserServiceConnectionResult` 的失败分类，并重新验证延迟回调和取消语义。
+2. 若上游更改 `Shizuku.UserServiceArgs` 或 ServiceConnection 生命周期，保留 `UserServiceConnectionResult` 的失败分类、原子回调领取、取消解绑和迟到 wrapper 销毁，并重新验证延迟回调和取消语义。
 3. 若上游新增 RootService，迁移时仍以远端 `id`/实际调用结果作为真实性判断，不能用授权开关代替能力检测。
 4. 合并 `AdvancedPage` 时保留官方新增设置项，只在 Shizuku 状态弹窗内移植诊断字段和按钮。
 
@@ -542,12 +549,14 @@ runtime/diagnostics/DecisionTrace.kt
 runtime/diagnostics/DecisionReason.kt
 runtime/diagnostics/DecisionTraceBuffer.kt
 app/src/test/kotlin/li/songe/gkd/runtime/diagnostics/DecisionTraceBufferTest.kt
+app/src/test/kotlin/li/songe/gkd/a11y/A11yEventQueueTest.kt
 ```
 
 修改：
 
 - `A11yRuleEngine.kt`
-  - 有效无障碍事件创建关联 ID，并把该 ID 传入消费与查询阶段；定时、强制和延迟查询在没有事件 ID 时自行分配。
+  - 无障碍事件先经过既有限流与队列合并，再由最终被消费的事件创建关联 ID，并把该 ID 传入查询阶段；被限流或被合并的事件不再留下孤立 ID。定时、强制和延迟查询在没有事件 ID 时自行分配。
+  - 队列只合并从队首开始连续且 `sameAs()` 的事件，禁止用全队列筛选数量删除队首，避免误删夹在同类事件之间的不同事件。
   - 旁路记录服务/匹配开关、前台确认、查询占用、窗口 root、规则状态、包名/Activity、选择器、动作提交和现有 Boolean 动作结果。
   - 捕获 `InterruptRuleMatchException` 时先记录 `StaleContext`，随后原样重新抛出，保持既有中断语义。
 - `ResolvedRule.kt`
@@ -555,7 +564,7 @@ app/src/test/kotlin/li/songe/gkd/runtime/diagnostics/DecisionTraceBufferTest.kt
 - `SettingsStore.kt`
   - 新增默认 `false` 的 `enableRuleDiagnostics`。旧 `store.json` 缺少字段时使用默认值；只有用户切换开关才产生一次正常设置写入。
 - `AdvancedPage.kt`、`AdvancedVm.kt`
-  - 日志区新增诊断开关和最近决策入口；弹窗显示最近未执行原因、最近 30 条，支持复制全部与清空内存。
+  - 日志区新增诊断开关和最近决策入口；弹窗通过缓冲 revision 响应每次追加和清空，实时显示缓存数量与最近 30 条，支持复制全部与清空内存。
 
 诊断数据模型：
 
@@ -567,15 +576,16 @@ app/src/test/kotlin/li/songe/gkd/runtime/diagnostics/DecisionTraceBufferTest.kt
 
 真机与自动测试：
 
-- `DecisionTraceBufferTest`：4 项，覆盖环形淘汰、关闭零记录、稳定枚举导出，以及正向观察不会覆盖最近未执行原因。
+- `DecisionTraceBufferTest`：5 项，覆盖环形淘汰、关闭零记录、稳定枚举导出、正向观察不会覆盖最近未执行原因，以及每次追加/清空都会推进 UI revision。
 - 哔哩哔哩 `.MainActivityV2`：已记录订阅 `667/app/...` 的规则状态与 `ForcedRuleSkipped`，关联 ID 能串起事件、前台和规则阶段。
 - 返回 GKD 高级设置：最近原因显示 `NoApplicableRules`，与当前界面无适用规则的事实一致。
 - 首轮 512 条缓冲在高频事件应用中约十秒填满，因此最终实现提高为 2048 条，并把 `RuleEligible` 移到强制窗口检查之后，避免为必然跳过的规则写两条记录。
 - 最终 2048 条 APK 原地升级后，同一轮哔哩哔哩启动、等待和返回高级设置仅产生 91 条记录；没有发生环形淘汰。
 - GKD 自身零规则使用 `NoApplicableRules/Observed`，不会覆盖目标应用的最近失败。最终最近失败为 `PackageActivityMismatch`，应用 `com.miui.securitycenter`，详情 `foreground=tv.danmaku.bili`，准确保留了过渡窗口与任务前台不一致的现场。
-- App Debug 单元测试共 8/8 通过，其中决策缓冲 4 项、Root 桥 3 项、原有示例 1 项；Release 构建通过。
+- 首版 App Debug 单元测试共 8/8 通过；最终审查修复后为 13/13，其中决策缓冲 5 项、连接回调竞态 3 项、连续事件合并 1 项、Root 桥分类 3 项、原有示例 1 项。Selector JVM 测试 18/18、Release 构建通过；最终 APK SHA-256 为 `AC4D66E4FAD64606946C9E9251DCDAC8F215B66DC2CCA4C49E9CF62CDDB764B6`，3,303,799 字节。
 - 最终阶段 1 APK：SHA-256 `32BDAB0954BD77B673C61805321E8F21691004C9EF2122B2FE6F2E7155BF2347`，3,303,851 字节；证书 SHA-256 为 `993B6D94D5AB2F34C95D95DFC6AB002E5BD939E6404BF36BC334998DBD8D9A9A`。
 - 真机 Root UserService 仍为 UID 0，StatusService 保持前台，本轮 logcat 无 `AndroidRuntime` 崩溃。3 个订阅 JSON 的 SHA-256 均与阶段 0 基线一致；`store.json` 因用户开启新增的诊断开关而产生预期设置差异。
+- 审查修复版在同一设备非清数据覆盖安装成功：Root UserService UID `0`，StatusService 前台状态正常，设置和 3 个订阅文件哈希均与安装前一致。首次特殊用途 AppOp 故障注入证明仅 `stopSelf()` 仍会被 Android 16 判定为未及时进入前台；改用 `shortService` 后在 AppOp 明确保持 `ignore` 时 `ExposeService(expose=0)` 正常生成快照、服务自行结束且零新增崩溃，随后 AppOp 已恢复为 `allow`。UserService 超时和重连中禁用仍为待测项。
 
 上游冲突策略：
 
