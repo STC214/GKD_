@@ -71,7 +71,7 @@ private val isAdbRestricted: Boolean
     }
 
 class ShizukuContext(
-    val serviceWrapper: UserServiceWrapper?,
+    serviceWrapper: UserServiceWrapper?,
     val packageManager: SafePackageManager?,
     val userManager: SafeUserManager?,
     val activityManager: SafeActivityManager?,
@@ -81,9 +81,16 @@ class ShizukuContext(
     val a11yManager: SafeAccessibilityManager?,
     val wmManager: SafeWindowManager?,
 ) {
+    @Volatile
+    var serviceWrapper: UserServiceWrapper? = serviceWrapper
+        private set
+
     val ok get() = this !== defaultShizukuContext
     fun destroy() {
-        serviceWrapper?.destroy()
+        val oldServiceWrapper = synchronized(this) {
+            serviceWrapper.also { serviceWrapper = null }
+        }
+        oldServiceWrapper?.destroy()
         if (activityTaskManager != null) {
             activityTaskManager.unregisterDefault()
         } else {
@@ -91,17 +98,35 @@ class ShizukuContext(
         }
     }
 
-    val states = listOf(
-        "IUserService" to serviceWrapper,
-        "IActivityManager" to activityManager,
-        "IActivityTaskManager" to activityTaskManager,
-        "IAppOpsService" to appOpsService,
-        "IInputManager" to inputManager,
-        "IPackageManager" to packageManager,
-        "IUserManager" to userManager,
-        "IAccessibilityManager" to a11yManager,
-        "IWindowManager" to wmManager,
-    )
+    val states: List<Pair<String, Any?>>
+        get() = listOf(
+            "IUserService" to serviceWrapper,
+            "IActivityManager" to activityManager,
+            "IActivityTaskManager" to activityTaskManager,
+            "IAppOpsService" to appOpsService,
+            "IInputManager" to inputManager,
+            "IPackageManager" to packageManager,
+            "IUserManager" to userManager,
+            "IAccessibilityManager" to a11yManager,
+            "IWindowManager" to wmManager,
+        )
+
+    fun installServiceWrapper(wrapper: UserServiceWrapper): Boolean {
+        synchronized(this) {
+            if (serviceWrapper != null) return false
+            serviceWrapper = wrapper
+        }
+        onServiceWrapperReady(wrapper)
+        return true
+    }
+
+    private fun onServiceWrapperReady(wrapper: UserServiceWrapper) {
+        // 某些情况下存在残留进程
+        val size = wrapper.userService.killLegacyService()
+        if (size > 0) {
+            LogUtils.d("killLegacyService $size")
+        }
+    }
 
     fun grantSelf() {
         packageManager ?: return
@@ -141,11 +166,7 @@ class ShizukuContext(
             activityManager?.registerDefault()
         }
         grantSelf()
-        // 某些情况下存在残留进程
-        val size = serviceWrapper?.userService?.killLegacyService()
-        if (size != null && size > 0) {
-            LogUtils.d("killLegacyService $size")
-        }
+        serviceWrapper?.let(::onServiceWrapperReady)
     }
 }
 
@@ -177,13 +198,137 @@ val shizukuUsedFlow by lazy {
 }
 
 val updateBinderMutex = MutexState()
+val rootBridgeReconnectMutex = MutexState()
+val rootBridgeDiagnosticsFlow = MutableStateFlow(RootBridgeDiagnostics())
+
+private const val AUTO_ROOT_RECONNECT_ATTEMPTS = 2
+
+private fun updateRootBridgeDiagnostics(
+    context: ShizukuContext = shizukuContextFlow.value,
+    attempt: Int = 0,
+    maxAttempts: Int = 0,
+    connectionResult: UserServiceConnectionResult? = null,
+    checking: Boolean = false,
+    exhausted: Boolean = false,
+) {
+    if (checking) {
+        rootBridgeDiagnosticsFlow.value = rootBridgeDiagnosticsFlow.value.copy(
+            phase = RootBridgePhase.Checking,
+            attempt = attempt,
+            maxAttempts = maxAttempts,
+            failure = null,
+            error = null,
+        )
+        return
+    }
+    if (!context.ok) {
+        rootBridgeDiagnosticsFlow.value = RootBridgeDiagnostics(
+            checkedAt = System.currentTimeMillis(),
+        )
+        return
+    }
+    val wrapper = context.serviceWrapper
+    val idResult = wrapper?.execCommandForResult("id")
+    val shellCommandAvailable = idResult?.ok == true
+    val remoteUid = idResult?.result?.let(::parseRemoteUid)
+    val effectiveExhausted = exhausted || (wrapper != null && !shellCommandAvailable)
+    val previous = rootBridgeDiagnosticsFlow.value
+    rootBridgeDiagnosticsFlow.value = RootBridgeDiagnostics(
+        phase = rootBridgePhase(
+            contextAvailable = true,
+            userServiceConnected = wrapper != null,
+            shellCommandAvailable = shellCommandAvailable,
+            remoteUid = remoteUid,
+            exhausted = effectiveExhausted,
+        ),
+        checkedAt = System.currentTimeMillis(),
+        attempt = attempt,
+        maxAttempts = maxAttempts,
+        userServiceConnected = wrapper != null,
+        shellCommandAvailable = shellCommandAvailable,
+        remoteUid = remoteUid,
+        binderAvailable = context.states.drop(1).count { it.second != null },
+        uiAutomationConnected = uiAutomationFlow.value != null,
+        topActivity = runCatching { context.topCpn()?.flattenToShortString() }.getOrNull(),
+        failure = connectionResult?.failure ?: previous.failure.takeIf { wrapper == null },
+        error = connectionResult?.error
+            ?: idResult?.error?.takeIf { it.isNotBlank() }
+            ?: previous.error.takeIf { wrapper == null },
+    )
+}
+
+fun refreshRootBridgeDiagnostics() {
+    appScope.launchTry(Dispatchers.IO) {
+        updateRootBridgeDiagnostics()
+    }
+}
+
+fun retryRootUserService(manual: Boolean = true) = rootBridgeReconnectMutex.launchTry(
+    appScope,
+    Dispatchers.IO,
+) {
+    val context = shizukuContextFlow.value
+    if (!shizukuUsedFlow.value || !context.ok) {
+        updateRootBridgeDiagnostics(context)
+        if (manual) toast("Shizuku 服务未连接")
+        return@launchTry
+    }
+    if (context.serviceWrapper != null) {
+        updateRootBridgeDiagnostics(context)
+        if (manual) toast("Root 用户服务已连接")
+        return@launchTry
+    }
+    val maxAttempts = AUTO_ROOT_RECONNECT_ATTEMPTS + 1
+    repeat(AUTO_ROOT_RECONNECT_ATTEMPTS) { index ->
+        val attempt = index + 2
+        updateRootBridgeDiagnostics(
+            context = context,
+            attempt = attempt,
+            maxAttempts = maxAttempts,
+            checking = true,
+        )
+        if (index > 0) delay(1000)
+        val result = buildServiceWrapper()
+        val wrapper = result.wrapper
+        if (wrapper != null) {
+            if (shizukuContextFlow.value === context && context.installServiceWrapper(wrapper)) {
+                updateRootBridgeDiagnostics(
+                    context = context,
+                    attempt = attempt,
+                    maxAttempts = maxAttempts,
+                    connectionResult = result,
+                )
+                LogUtils.d("Root UserService reconnect success, attempt=$attempt/$maxAttempts")
+                if (manual) toast("Root 用户服务连接成功")
+                return@launchTry
+            }
+            wrapper.destroy()
+            updateRootBridgeDiagnostics(shizukuContextFlow.value)
+            return@launchTry
+        }
+        val exhausted = index == AUTO_ROOT_RECONNECT_ATTEMPTS - 1
+        updateRootBridgeDiagnostics(
+            context = context,
+            attempt = attempt,
+            maxAttempts = maxAttempts,
+            connectionResult = result,
+            exhausted = exhausted,
+        )
+        LogUtils.d(
+            "Root UserService reconnect failed, attempt=$attempt/$maxAttempts, failure=${result.failure}, error=${result.error}"
+        )
+    }
+    if (manual) toast("Root 用户服务连接失败")
+}
+
 private fun updateShizukuBinder() = updateBinderMutex.launchTry(appScope, Dispatchers.IO) {
     if (shizukuUsedFlow.value) {
         if (!app.justStarted) {
             toast("正在连接 Shizuku 服务...")
         }
+        val userServiceResult = buildServiceWrapper()
         val shizukuContext = ShizukuContext(
-            serviceWrapper = buildServiceWrapper(),
+            serviceWrapper = userServiceResult.wrapper,
             packageManager = SafePackageManager.newBinder(),
             userManager = SafeUserManager.newBinder(),
             activityManager = SafeActivityManager.newBinder(),
@@ -194,6 +339,12 @@ private fun updateShizukuBinder() = updateBinderMutex.launchTry(appScope, Dispat
             wmManager = SafeWindowManager.newBinder(),
         )
         shizukuContextFlow.value = shizukuContext
+        updateRootBridgeDiagnostics(
+            context = shizukuContext,
+            attempt = 1,
+            maxAttempts = AUTO_ROOT_RECONNECT_ATTEMPTS + 1,
+            connectionResult = userServiceResult,
+        )
         shizukuContext.topCpn()?.let { cpn ->
             updateTopTaskAppId(cpn.packageName)
         }
@@ -216,6 +367,7 @@ private fun updateShizukuBinder() = updateBinderMutex.launchTry(appScope, Dispat
             } else {
                 toast("Shizuku 服务连接失败", delayMillis = delayMillis)
             }
+            retryRootUserService(manual = false)
         } else {
             toast("Shizuku 服务连接成功", delayMillis = delayMillis)
         }
@@ -228,6 +380,7 @@ private fun updateShizukuBinder() = updateBinderMutex.launchTry(appScope, Dispat
             uiAutomationFlow.value?.shutdown(true)
             shizukuContextFlow.value.destroy()
             shizukuContextFlow.value = defaultShizukuContext
+            updateRootBridgeDiagnostics(defaultShizukuContext)
             toast("Shizuku 服务已断开")
         }
     }

@@ -82,7 +82,11 @@ data class Notif(
 
     context(service: Service)
     fun notifyService() {
-        if (!notificationState.updateAndGet()) return
+        // Android 13+ 允许在 POST_NOTIFICATIONS 被拒绝时运行前台服务，
+        // 此时通知仍会显示在系统的“活动应用”任务管理器中。
+        // 不能因为通知权限被拒绝而跳过 startForeground，否则由
+        // startForegroundService 拉起的服务会触发系统超时崩溃。
+        notificationState.updateAndGet()
         if (!foregroundServiceSpecialUseState.updateAndGet()) return
         ServiceCompat.startForeground(
             service,

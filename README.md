@@ -58,6 +58,7 @@ ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
 
 ```text
 app/                    GKD Android 应用
+docs/                   本 fork 的设计与实施文档
 gradle/                 Gradle Wrapper 配置
 hidden_api/             Android 隐藏 API 声明
 selector/               GKD 选择器模块
@@ -69,6 +70,16 @@ local-assets/           本机辅助资料，不纳入 Git
 ```
 
 `local-assets/` 只用于本机排障和保存外部依赖，不参与 Android 构建或模块打包。Gradle 生成目录及 `ksu-sukisu-module/dist/`、`work/` 同样保持 Git 忽略。
+
+## 开发路线
+
+后续开发统一使用以下文档：
+
+- [`docs/root-runtime-refactor-plan.md`](docs/root-runtime-refactor-plan.md)：规定窗口判断、规则调度、动作执行和 APK 内置 root 服务的实施顺序、验收标准与回滚点。
+- [`docs/upstream-code-delta-guide.md`](docs/upstream-code-delta-guide.md)：逐项记录本 fork 与官方 GKD 的代码级差异、行为不变量、冲突风险和上游更新后的迁移方法。
+- [`docs/testing/root-runtime-baseline.md`](docs/testing/root-runtime-baseline.md)：记录阶段 0 的 APK、签名、真实规则复现集、固定窗口场景和订阅兼容验收结果。
+
+每个开发阶段都必须同步更新代码差异文档；代码完成但差异记录未更新时，不得将该阶段标记为完成。两份文档共同要求保持现有规则格式、选择器语法、订阅更新、数据库和备份兼容。
 
 ## 截图
 

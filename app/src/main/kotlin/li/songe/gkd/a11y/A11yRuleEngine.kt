@@ -27,6 +27,10 @@ import li.songe.gkd.data.ResolvedRule
 import li.songe.gkd.data.RpcError
 import li.songe.gkd.data.RuleStatus
 import li.songe.gkd.isActivityVisible
+import li.songe.gkd.runtime.diagnostics.DecisionOutcome
+import li.songe.gkd.runtime.diagnostics.DecisionReason
+import li.songe.gkd.runtime.diagnostics.DecisionStage
+import li.songe.gkd.runtime.diagnostics.decisionTraceBuffer
 import li.songe.gkd.service.A11yService
 import li.songe.gkd.service.EventService
 import li.songe.gkd.service.topAppIdFlow
@@ -36,6 +40,7 @@ import li.songe.gkd.store.actualBlockA11yAppList
 import li.songe.gkd.store.storeFlow
 import li.songe.gkd.util.AndroidTarget
 import li.songe.gkd.util.AutomatorModeOption
+import li.songe.gkd.util.InterruptRuleMatchException
 import li.songe.gkd.util.launchTry
 import li.songe.gkd.util.runMainPost
 import li.songe.gkd.util.showActionToast
@@ -108,6 +113,50 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
 
     private val scope get() = service.scope
 
+    private fun traceDecision(
+        correlationId: Long?,
+        stage: DecisionStage,
+        outcome: DecisionOutcome,
+        reason: DecisionReason,
+        rule: ResolvedRule? = null,
+        detail: String? = null,
+        appId: String? = null,
+        activityId: String? = null,
+    ) {
+        if (correlationId == null) return
+        val topActivity = topActivityFlow.value
+        decisionTraceBuffer.append(
+            correlationId = correlationId,
+            stage = stage,
+            outcome = outcome,
+            reason = reason,
+            appId = appId ?: topActivity.appId.takeIf { it.isNotEmpty() },
+            activityId = activityId ?: topActivity.activityId,
+            ruleId = rule?.diagnosticId,
+            detail = detail,
+        )
+    }
+
+    private fun traceRuleStatus(correlationId: Long?, rule: ResolvedRule, status: RuleStatus) {
+        if (correlationId == null) return
+        val reason = when (status) {
+            RuleStatus.StatusOk -> DecisionReason.RuleEligible
+            RuleStatus.Status1 -> DecisionReason.ActionMaximumReached
+            RuleStatus.Status2 -> DecisionReason.PrerequisiteUnsatisfied
+            RuleStatus.Status3 -> DecisionReason.MatchDelayActive
+            RuleStatus.Status4 -> DecisionReason.MatchTimeout
+            RuleStatus.Status5 -> DecisionReason.CooldownActive
+            RuleStatus.Status6 -> DecisionReason.ActionDelayActive
+        }
+        traceDecision(
+            correlationId = correlationId,
+            stage = DecisionStage.Rule,
+            outcome = if (status.ok) DecisionOutcome.Observed else DecisionOutcome.Skipped,
+            reason = reason,
+            rule = rule,
+        )
+    }
+
     @Volatile
     private var latestStateEvent: A11yEvent? = null
     private var lastContentEventTime = 0L
@@ -131,6 +180,16 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         if ((event.eventType == CONTENT_CHANGED || !isActivityVisible) && event.packageName == META.appId) return
 
         val a11yEvent = event.toA11yEvent() ?: return
+        val decisionId = decisionTraceBuffer.newCorrelationId()
+        traceDecision(
+            correlationId = decisionId,
+            stage = DecisionStage.Event,
+            outcome = DecisionOutcome.Observed,
+            reason = DecisionReason.EventReceived,
+            appId = a11yEvent.appId,
+            activityId = a11yEvent.name,
+            detail = "type=${a11yEvent.type}",
+        )
         if (a11yEvent.type == CONTENT_CHANGED) {
             // 防止 content 类型事件过快
             if (a11yEvent.time - lastContentEventTime < 100 && a11yEvent.time - appChangeTime > 5000 && a11yEvent.time - lastTriggerTime > 3000) {
@@ -155,11 +214,11 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             latestStateEvent = a11yEvent
         }
         synchronized(eventDeque) { eventDeque.addLast(a11yEvent) }
-        scope.launch(eventDispatcher) { consumeEvent(a11yEvent) }
+        scope.launch(eventDispatcher) { consumeEvent(a11yEvent, decisionId) }
     }
 
     private val queryEvents = mutableListOf<A11yEvent>()
-    private suspend fun consumeEvent(headEvent: A11yEvent) {
+    private suspend fun consumeEvent(headEvent: A11yEvent, decisionId: Long?) {
         val consumedEvents = synchronized(eventDeque) {
             if (eventDeque.firstOrNull() !== headEvent) return
             eventDeque.filter { it.sameAs(headEvent) }.apply {
@@ -173,7 +232,17 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         val rightAppId = if (oldAppId == evAppId) {
             evAppId
         } else {
-            getTimeoutAppId() ?: return
+            getTimeoutAppId() ?: run {
+                traceDecision(
+                    correlationId = decisionId,
+                    stage = DecisionStage.Foreground,
+                    outcome = DecisionOutcome.Skipped,
+                    reason = DecisionReason.ForegroundUnconfirmed,
+                    appId = evAppId,
+                    activityId = evActivityId,
+                )
+                return
+            }
         }
         if (rightAppId == evAppId) {
             if (latestEvent.type == STATE_CHANGED) {
@@ -196,13 +265,62 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 }
             }
         }
+        traceDecision(
+            correlationId = decisionId,
+            stage = DecisionStage.Foreground,
+            outcome = DecisionOutcome.Observed,
+            reason = DecisionReason.ForegroundConfirmed,
+            appId = rightAppId,
+            activityId = topActivityFlow.value.activityId,
+        )
         val activityRule = activityRuleFlow.value
-        if (evAppId != rightAppId || activityRule.skipConsumeEvent || !storeFlow.value.enableMatch) {
+        if (evAppId != rightAppId) {
+            traceDecision(
+                correlationId = decisionId,
+                stage = DecisionStage.Foreground,
+                outcome = DecisionOutcome.Skipped,
+                reason = DecisionReason.PackageActivityMismatch,
+                appId = evAppId,
+                activityId = evActivityId,
+                detail = "foreground=$rightAppId",
+            )
+            return
+        }
+        if (!storeFlow.value.enableMatch) {
+            traceDecision(
+                correlationId = decisionId,
+                stage = DecisionStage.Query,
+                outcome = DecisionOutcome.Skipped,
+                reason = DecisionReason.AutoMatchDisabled,
+            )
+            return
+        }
+        if (activityRule.currentRules.isEmpty()) {
+            traceDecision(
+                correlationId = decisionId,
+                stage = DecisionStage.Rule,
+                outcome = if (rightAppId == META.appId) DecisionOutcome.Observed else DecisionOutcome.Skipped,
+                reason = DecisionReason.NoApplicableRules,
+                appId = rightAppId,
+                activityId = activityRule.topActivity.activityId,
+            )
+            return
+        }
+        if (activityRule.skipConsumeEvent) {
+            traceDecision(
+                correlationId = decisionId,
+                stage = DecisionStage.Rule,
+                outcome = DecisionOutcome.Skipped,
+                reason = DecisionReason.MatchingPaused,
+            )
+            activityRule.currentRules.forEach { rule ->
+                traceRuleStatus(decisionId, rule, rule.status)
+            }
             return
         }
         synchronized(queryEvents) { queryEvents.addAll(consumedEvents) }
         a11yContext.interruptKey++
-        startQueryJob(byEvent = latestEvent)
+        startQueryJob(byEvent = latestEvent, decisionId = decisionId)
     }
 
     private var lastGetAppIdTime = 0L
@@ -245,13 +363,36 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         byEvent: A11yEvent? = null,
         byForced: Boolean = false,
         byDelayRule: ResolvedRule? = null,
+        decisionId: Long? = null,
     ) {
-        if (!effective) return
-        if (!storeFlow.value.enableMatch) return
-        if (activityRuleFlow.value.currentRules.isEmpty()) return
-        if (querying) return
+        val traceId = decisionId ?: decisionTraceBuffer.newCorrelationId()
+        if (!effective) {
+            traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.ServiceDisconnected)
+            return
+        }
+        if (!storeFlow.value.enableMatch) {
+            traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.AutoMatchDisabled)
+            return
+        }
+        if (activityRuleFlow.value.currentRules.isEmpty()) {
+            traceDecision(
+                traceId,
+                DecisionStage.Rule,
+                if (topActivityFlow.value.appId == META.appId) DecisionOutcome.Observed else DecisionOutcome.Skipped,
+                DecisionReason.NoApplicableRules,
+            )
+            return
+        }
+        if (querying) {
+            traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.QueryAlreadyRunning)
+            return
+        }
         // 无障碍从零启动时获取 safeActiveWindow 非常耗时
-        if (byEvent == null && service.justStarted && !hasOthersService) return checkFutureStartJob()
+        if (byEvent == null && service.justStarted && !hasOthersService) {
+            traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.ServiceStarting)
+            return checkFutureStartJob()
+        }
+        traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Observed, DecisionReason.QueryStarted)
         scope.launchTry(queryDispatcher) {
             querying = true
             val st = if (META.debuggable) System.currentTimeMillis() else 0L
@@ -262,7 +403,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                         "startQueryJob start byEvent=${byEvent != null}, byForced=$byForced, byDelayRule=${byDelayRule != null}"
                     )
                 }
-                queryAction(byEvent, byForced, byDelayRule)
+                queryAction(traceId, byEvent, byForced, byDelayRule)
             } finally {
                 checkFutureStartJob()
                 if (META.debuggable) {
@@ -306,6 +447,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     }
 
     private suspend fun queryAction(
+        decisionId: Long?,
         byEvent: A11yEvent? = null,
         byForced: Boolean = false,
         delayRule: ResolvedRule? = null,
@@ -316,6 +458,12 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         } else {
             synchronized(queryEvents) {
                 if (byEvent != null && queryEvents.isEmpty()) {
+                    traceDecision(
+                        decisionId,
+                        DecisionStage.Event,
+                        DecisionOutcome.Skipped,
+                        DecisionReason.EventQueueEmpty,
+                    )
                     return
                 }
                 (if (queryEvents.size > 1) {
@@ -353,6 +501,9 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
         if (activityRule.skipMatch) {
             // 如果当前应用没有规则/暂停匹配, 则不去调用获取事件节点避免阻塞
+            activityRule.currentRules.forEach { rule ->
+                traceRuleStatus(decisionId, rule, rule.status)
+            }
             return
         }
         var lastNode = if (newEvents == null || newEvents.size <= 1) {
@@ -375,11 +526,25 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             }
         }
         for (rule in activityRule.priorityRules) { // 规则数量有可能过多导致耗时过长
-            if (!effective) return
-            if (checkOutDate(activityRule, tempStateEvent)) break
+            if (!effective) {
+                traceDecision(decisionId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.ServiceDisconnected, rule)
+                return
+            }
+            if (checkOutDate(activityRule, tempStateEvent)) {
+                traceDecision(decisionId, DecisionStage.Foreground, DecisionOutcome.Skipped, DecisionReason.StaleContext, rule)
+                break
+            }
             if (delayRule != null && delayRule !== rule) continue
-            if (rule.status != RuleStatus.StatusOk) continue
-            if (byForced && !rule.checkForced()) continue
+            val status = rule.status
+            if (status != RuleStatus.StatusOk) {
+                traceRuleStatus(decisionId, rule, status)
+                continue
+            }
+            if (byForced && !rule.checkForced()) {
+                traceDecision(decisionId, DecisionStage.Rule, DecisionOutcome.Skipped, DecisionReason.ForcedRuleSkipped, rule)
+                continue
+            }
+            traceRuleStatus(decisionId, rule, status)
             lastNode?.let { n ->
                 val refreshOk = (!lastNodeUsed) || (try {
                     val e = n.refresh()
@@ -395,16 +560,47 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     lastNode = null
                 }
             }
-            val nodeVal = (lastNode ?: getTimeoutActiveWindow()) ?: continue
-            val rightAppId = nodeVal.packageName?.toString() ?: break
+            val nodeVal = lastNode ?: getTimeoutActiveWindow()
+            if (nodeVal == null) {
+                traceDecision(decisionId, DecisionStage.Window, DecisionOutcome.Skipped, DecisionReason.WindowRootUnavailable, rule)
+                continue
+            }
+            traceDecision(decisionId, DecisionStage.Window, DecisionOutcome.Observed, DecisionReason.WindowRootAvailable, rule)
+            val rightAppId = nodeVal.packageName?.toString()
+            if (rightAppId == null) {
+                traceDecision(decisionId, DecisionStage.Window, DecisionOutcome.Skipped, DecisionReason.WindowRootUnavailable, rule, "root packageName is null")
+                break
+            }
             val matchApp = rule.matchActivity(rightAppId)
             if (topActivityFlow.value.appId != rightAppId || (!matchApp && rule is AppRule)) {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Foreground,
+                    DecisionOutcome.Skipped,
+                    DecisionReason.PackageActivityMismatch,
+                    rule,
+                    "root=$rightAppId matchApp=$matchApp",
+                )
                 scope.launch(eventDispatcher) { fixAppId(rightAppId) }
                 return
             }
-            if (!matchApp) continue
-            val target = a11yContext.queryRule(rule, nodeVal) ?: continue
+            if (!matchApp) {
+                traceDecision(decisionId, DecisionStage.Foreground, DecisionOutcome.Skipped, DecisionReason.PackageActivityMismatch, rule, "root=$rightAppId")
+                continue
+            }
+            val target = try {
+                a11yContext.queryRule(rule, nodeVal)
+            } catch (e: InterruptRuleMatchException) {
+                traceDecision(decisionId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.StaleContext, rule, "priority interrupt")
+                throw e
+            }
+            if (target == null) {
+                traceDecision(decisionId, DecisionStage.Selector, DecisionOutcome.Skipped, DecisionReason.SelectorMiss, rule)
+                continue
+            }
+            traceDecision(decisionId, DecisionStage.Selector, DecisionOutcome.Observed, DecisionReason.SelectorMatched, rule)
             if (rule.checkDelay() && rule.actionDelayJob.value == null) {
+                traceDecision(decisionId, DecisionStage.Rule, DecisionOutcome.Skipped, DecisionReason.ActionDelayActive, rule)
                 rule.actionDelayJob.value = scope.launch(actionDispatcher) {
                     delay(rule.actionDelay)
                     rule.actionDelayJob.value = null
@@ -412,10 +608,26 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 }
                 continue
             }
-            if (rule.status != RuleStatus.StatusOk) break
-            if (checkOutDate(activityRule, tempStateEvent)) break
+            val actionStatus = rule.status
+            if (actionStatus != RuleStatus.StatusOk) {
+                traceRuleStatus(decisionId, rule, actionStatus)
+                break
+            }
+            if (checkOutDate(activityRule, tempStateEvent)) {
+                traceDecision(decisionId, DecisionStage.Foreground, DecisionOutcome.Skipped, DecisionReason.StaleContext, rule)
+                break
+            }
+            traceDecision(decisionId, DecisionStage.Action, DecisionOutcome.Submitted, DecisionReason.ActionSubmitted, rule)
             val actionResult = rule.performAction(target)
             if (actionResult.result) {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Action,
+                    DecisionOutcome.Succeeded,
+                    DecisionReason.ActionSucceeded,
+                    rule,
+                    "action=${actionResult.action}",
+                )
                 val topActivity = topActivityFlow.value
                 rule.trigger()
                 scope.launch(actionDispatcher) {
@@ -426,6 +638,15 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     showActionToast(rule)
                 }
                 addActionLog(rule, topActivity, target, actionResult)
+            } else {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Action,
+                    DecisionOutcome.Failed,
+                    DecisionReason.ActionRejected,
+                    rule,
+                    "action=${actionResult.action}",
+                )
             }
         }
     }

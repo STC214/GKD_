@@ -7,5 +7,6 @@ class AdvancedVm : ViewModel() {
 
     val showEditPortDlgFlow = MutableStateFlow(false)
     val showShizukuStateFlow = MutableStateFlow(false)
+    val showDecisionDiagnosticsFlow = MutableStateFlow(false)
     val showCaptureScreenshotDlgFlow = MutableStateFlow(false)
 }

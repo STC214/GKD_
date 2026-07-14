@@ -201,6 +201,9 @@ sealed class ResolvedRule(
         return "id:${subsItem.id}, v:${rawSubs.version}, type:${type}, gKey=${group.key}, gName:${group.name}, index:${index}, key:${key}, status:${status.name}"
     }
 
+    val diagnosticId: String
+        get() = "${subsItem.id}/${type}/${group.key}/${key ?: index}"
+
     abstract val type: String
 
     // 范围越精确, 优先级越高

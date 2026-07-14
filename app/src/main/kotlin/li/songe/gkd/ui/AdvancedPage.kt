@@ -59,12 +59,17 @@ import li.songe.gkd.permission.foregroundServiceSpecialUseState
 import li.songe.gkd.permission.notificationState
 import li.songe.gkd.permission.requiredPermission
 import li.songe.gkd.permission.shizukuGrantedState
+import li.songe.gkd.runtime.diagnostics.decisionTraceBuffer
 import li.songe.gkd.service.ActivityService
 import li.songe.gkd.service.ButtonService
 import li.songe.gkd.service.EventService
 import li.songe.gkd.service.HttpService
 import li.songe.gkd.service.ScreenshotService
 import li.songe.gkd.shizuku.shizukuContextFlow
+import li.songe.gkd.shizuku.refreshRootBridgeDiagnostics
+import li.songe.gkd.shizuku.retryRootUserService
+import li.songe.gkd.shizuku.rootBridgeDiagnosticsFlow
+import li.songe.gkd.shizuku.rootBridgeReconnectMutex
 import li.songe.gkd.shizuku.updateBinderMutex
 import li.songe.gkd.store.storeFlow
 import li.songe.gkd.ui.component.AuthCard
@@ -85,6 +90,8 @@ import li.songe.gkd.ui.style.titleItemPadding
 import li.songe.gkd.util.AndroidTarget
 import li.songe.gkd.util.ShortUrlSet
 import li.songe.gkd.util.appInfoMapFlow
+import li.songe.gkd.util.copyText
+import li.songe.gkd.util.format
 import li.songe.gkd.util.launchAsFn
 import li.songe.gkd.util.throttle
 import li.songe.gkd.util.toast
@@ -172,12 +179,35 @@ fun AdvancedPage() {
     var showShizukuState by vm.showShizukuStateFlow.asMutableState()
     if (showShizukuState) {
         val onDismissRequest = { showShizukuState = false }
+        val shizukuContext by shizukuContextFlow.collectAsState()
+        val diagnostics by rootBridgeDiagnosticsFlow.collectAsState()
+        val reconnecting by rootBridgeReconnectMutex.state.collectAsState()
         AlertDialog(
-            title = { Text(text = "授权状态") },
+            title = { Text(text = "Root 与授权状态") },
             text = {
-                val states = shizukuContextFlow.collectAsState().value.states
-                Column {
-                    states.forEach { (name, value) ->
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = diagnostics.statusText,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text("系统 Binder：${diagnostics.binderAvailable}/${diagnostics.binderTotal}")
+                    Text("IUserService：${if (diagnostics.userServiceConnected) "已连接" else "未连接"}")
+                    Text("远端 UID：${diagnostics.remoteUid?.toString() ?: "未知"}")
+                    Text("Shell 自检：${if (diagnostics.shellCommandAvailable) "通过" else "未通过"}")
+                    Text("UiAutomation：${if (diagnostics.uiAutomationConnected) "已连接" else "未连接"}")
+                    diagnostics.topActivity?.let { Text("前台 Activity：$it") }
+                    if (diagnostics.attempt > 0) {
+                        Text("连接尝试：${diagnostics.attempt}/${diagnostics.maxAttempts}")
+                    }
+                    diagnostics.failure?.let { Text("失败类型：$it") }
+                    diagnostics.error?.takeIf { it.isNotBlank() }?.let { Text("错误：$it") }
+                    diagnostics.checkedAt?.let { Text("检测时间：${it.format("HH:mm:ss")}") }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    shizukuContext.states.forEach { (name, value) ->
                         Text(
                             text = name,
                             textDecoration = if (value != null) null else TextDecoration.LineThrough,
@@ -188,7 +218,80 @@ fun AdvancedPage() {
             onDismissRequest = onDismissRequest,
             confirmButton = {
                 TextButton(onClick = onDismissRequest) {
-                    Text(text = "我知道了")
+                    Text(text = "关闭")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !reconnecting,
+                    onClick = {
+                        if (shizukuContext.serviceWrapper == null) {
+                            retryRootUserService()
+                        } else {
+                            refreshRootBridgeDiagnostics()
+                        }
+                    },
+                ) {
+                    Text(text = if (reconnecting) "连接中" else if (shizukuContext.serviceWrapper == null) "重新连接" else "重新检测")
+                }
+            },
+        )
+    }
+
+    var showDecisionDiagnostics by vm.showDecisionDiagnosticsFlow.asMutableState()
+    if (showDecisionDiagnostics) {
+        val latestSkipped by decisionTraceBuffer.latestSkippedFlow.collectAsState()
+        val records = remember(latestSkipped) {
+            decisionTraceBuffer.snapshot().takeLast(30).reversed()
+        }
+        AlertDialog(
+            title = { Text(text = "规则决策诊断") },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = if (store.enableRuleDiagnostics) "诊断已启用（仅内存）" else "诊断已关闭",
+                        color = if (store.enableRuleDiagnostics) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text("缓存：${decisionTraceBuffer.snapshot().size}/2048")
+                    Text(
+                        text = "最近未执行：${latestSkipped?.summary ?: "暂无记录"}",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    latestSkipped?.detail?.let { Text("详情：$it") }
+                    if (records.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        records.forEach { trace ->
+                            Text(
+                                text = "#${trace.correlationId} ${trace.stage.label}/${trace.outcome.label} ${trace.summary}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Text(
+                            text = "清空内存记录",
+                            color = MaterialTheme.colorScheme.primary,
+                            textDecoration = TextDecoration.Underline,
+                            modifier = Modifier.clickable {
+                                decisionTraceBuffer.clear()
+                            },
+                        )
+                    }
+                }
+            },
+            onDismissRequest = { showDecisionDiagnostics = false },
+            confirmButton = {
+                TextButton(onClick = { showDecisionDiagnostics = false }) {
+                    Text(text = "关闭")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = records.isNotEmpty(),
+                    onClick = { copyText(decisionTraceBuffer.exportText()) },
+                ) {
+                    Text(text = "复制全部")
                 }
             },
         )
@@ -326,6 +429,7 @@ fun AdvancedPage() {
                     modifier = Modifier
                         .clip(MaterialTheme.shapes.extraSmall)
                         .clickable(onClickLabel = "打开 Shizuku 状态弹窗", onClick = throttle {
+                            refreshRootBridgeDiagnostics()
                             showShizukuState = true
                         })
                         .iconTextSize(textStyle = MaterialTheme.typography.titleSmall),
@@ -592,6 +696,28 @@ fun AdvancedPage() {
                 modifier = Modifier.titleItemPadding(),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
+            )
+            TextSwitch(
+                title = "规则决策诊断",
+                subtitle = "仅在内存保留最近 2048 条，默认关闭",
+                checked = store.enableRuleDiagnostics,
+                onCheckedChange = {
+                    storeFlow.update { current ->
+                        current.copy(enableRuleDiagnostics = it)
+                    }
+                },
+            )
+            val latestSkipped by decisionTraceBuffer.latestSkippedFlow.collectAsState()
+            SettingItem(
+                title = "最近规则决策",
+                subtitle = when {
+                    latestSkipped != null -> latestSkipped!!.summary
+                    store.enableRuleDiagnostics -> "暂无未执行记录"
+                    else -> "诊断已关闭，点击查看已有记录"
+                },
+                onClick = {
+                    showDecisionDiagnostics = true
+                },
             )
             SettingItem(
                 title = "界面日志",
