@@ -11,9 +11,18 @@
 
 # 更新内容
 
+- 阶段 7 第三切片新增显式特权输入桥：坐标点击、长按和滑动依次选择 APK RootService、Shizuku/Sui、无障碍手势，并在每次降级前复核同一窗口上下文。
+- Root 请求边界来自 `windowBounds ∩ visibleBounds`；诊断后端区分 `ApkRoot`、`Shizuku` 与 `Accessibility`，不再把两个特权通道统称为 Root。
+- 只有明确 `Rejected/Unavailable` 才允许切换后端；Binder 异常和逐事件输入失败按可能已有副作用处理，终止本次动作，避免重复点击或重复滑动。
+- Android 16 真机已验证结构化 B 站坐标点击返回 `Completed/ApkRoot`；杀死 APK RootService 后 Debug 主进程继续运行，同一点击返回 `Completed/Accessibility`，页面只导航一次且无 `AndroidRuntime` 崩溃。
+- 新增默认关闭的“启用 Root 增强”开关；开启后由应用生命周期持有非 daemon RootService，Binder/连接故障按 750/1500ms 最多自动重连两次，关闭后立即解绑，拒绝和 8 秒超时不循环请求。
+- Root AIDL 升级到协议 2，事务 6 只返回结构化只读前台 Task；前台融合优先使用 Root Task，缺失或读取失败时保留 Shizuku 回退，不放宽 `Confirmed + Application` 动作门。
+- Android 16 独立 Debug 包已完成协议 2 真机验收：关闭 Shizuku 后，B 站一次性规则仍由 Root Task 确认可执行并通过 `ApkRoot` 导航；RootService 被杀后约 1 秒自动重连，关闭 Root 开关后保持断开，重新开启后恢复连接。
+- Root 未授权时 8 秒无回调会稳定收口为 `connection timeout`，不会循环请求；撤权并终止既有 RootService 后无法重新提权，同一 B 站安全动作可降级为 `Accessibility` 且只执行一次。保留数据覆盖更新不会绕过撤权，重新授权并冷启动后可恢复协议 2 连接。
+- SukiSU 外部撤权只保存后续 `allow=0`，不会主动杀死已经运行的 UID 0 进程；“启用 Root 增强”说明新增即时撤权提示，要求先关闭 App 内开关以立即解绑并终止非 daemon RootService。
 - 阶段 7 首个最小切片固定 libsu 6.0.0，引入普通非 daemon APK RootService；当前 AIDL 只暴露协议版本、远端 PID/UID 和服务包名，不包含任意 shell、文件路径、订阅或数据库入口。
 - RootService 每次调用校验调用 UID、UID 对应包和共享 UID 下的签名一致性；客户端只接受 UID 0、协议与包名匹配的 Binder，并处理 Binder 死亡、空 Binder、授权异常和 8 秒连接超时。
-- “Root 与授权状态”弹窗会按需请求 APK RootService 并显示远端身份；最小握手已真机通过，当前输入动作仍使用原后端，下一步再按结构化接口分批迁移。
+- “Root 与授权状态”弹窗会按需请求 APK RootService 并显示远端身份；启用 Root 增强后，常规应用生命周期会直接持有连接，普通规则不再依赖先打开该弹窗。
 - Android 16 真机确认 APK RootService 以 UID 0 运行且协议为 1；杀死 root 子进程后 App 不崩溃，诊断保留 `binder died`，手动重连生成新 PID。强停、覆盖更新和卸载 Debug 包后均无 daemon 残留。
 - RootService 第二切片新增 Parcelable 结构化 `tap/swipe` 请求：只接受数值动作、displayId、有限坐标、时长和半开窗口边界，拒绝未知动作、NaN/Infinity、越界坐标、非法时长及非规范 Tap；返回 Completed/Rejected/Unavailable/Failed，不开放命令或路径。
 - 增加米游社签到规则兼容层：原神/绝区零分支使用“每日签到”标题锚点，星穹铁道分支使用奖励结构签名并设置 5 秒最短冷却；不改写订阅文件，不影响订阅在线更新。

@@ -6,11 +6,21 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.Process
 import com.topjohnwu.superuser.ipc.RootService
+import li.songe.gkd.shizuku.SafeActivityManager
+import li.songe.gkd.shizuku.SafeActivityTaskManager
 import li.songe.gkd.shizuku.SafeInputManager
+import li.songe.gkd.shizuku.currentUserId
+import li.songe.gkd.shizuku.selectForegroundTaskFromRunningTasks
 
 class GkdRootService : RootService() {
     private val inputManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         SafeInputManager.newRootBinder()
+    }
+    private val activityTaskManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        SafeActivityTaskManager.newRootBinder()
+    }
+    private val activityManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        SafeActivityManager.newRootBinder()
     }
 
     private fun enforceTrustedCaller() {
@@ -82,6 +92,18 @@ class GkdRootService : RootService() {
                 else -> false
             }
             return if (completed) ROOT_INPUT_RESULT_COMPLETED else ROOT_INPUT_RESULT_FAILED
+        }
+
+        override fun getForegroundTask(displayId: Int): RootForegroundTask? {
+            enforceTrustedCaller()
+            if (displayId < 0) return null
+            return selectForegroundTaskFromRunningTasks(
+                tasks = activityTaskManager?.getTasks(16)
+                    ?: activityManager?.getTasks(16)
+                    ?: emptyList(),
+                targetDisplayId = displayId,
+                fallbackUserId = currentUserId,
+            )?.toRootForegroundTask()
         }
     }
 

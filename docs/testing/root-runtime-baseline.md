@@ -577,3 +577,55 @@ Binder 死亡首轮发现具体 `binder died` 会被随后到达的 `onServiceDi
 非 daemon 清理验证：强停 `li.songe.gkd.debug` 后 PID `30430` 自动退出；覆盖更新会终止旧 App/root 进程；卸载 Debug 包后包名、App 进程和 root 子进程均不存在。手机 Download 中本轮 APK/XML/截图临时文件已删除；正式版主进程仍为 PID `4014`，StatusService `isForeground=true`。本地截图证据保存在忽略目录 `local-assets/diagnostics/root-runtime/phase7-rootservice/`。
 
 第二切片在上述清理后实现，未重新安装测试包，也未触发真机输入。`RootInputRequest` 使用 Parcelable 数值字段和固定事务 5；服务端校验动作、displayId、有限坐标、半开窗口边界、0～10 秒 tap/1～10 秒 swipe 及 Tap 双端点一致性，之后才调用系统 `IInputManager` 逐事件路径。root AIDL/实现静态检查无 `execCommand`、`Runtime.exec`、命令字符串或文件路径入口。新增 8 项测试后 App 115/115、Selector 18/18、Release/R8/Vital Lint 通过；必须等显式特权桥接完成后用安全样本验证真实输入，不能把本次构建通过写成真机动作已完成。
+
+### 14.1 阶段 7 显式特权桥构建记录
+
+2026-07-15 第三切片新增 `PrivilegedInputBridge`，将 `clickCenter`、`longClickCenter`、`swipe` 接入 APK RootService → Shizuku/Sui → Accessibility 顺序。Root 请求使用动作上下文中的 displayId，并把 `windowBounds ∩ visibleBounds` 作为半开授权区域；每次后端切换前复核同一窗口 guard。诊断新增 `ApkRoot`、`Shizuku`，旧 `Root` 仅保留历史兼容。
+
+安全降级语义固定如下：Root/Shizuku 明确 Rejected 或没有后端时才可继续；Binder 远端异常、已有后端但逐事件返回 false 均视为 Failed，因为 DOWN/MOVE 可能已经产生副作用，禁止再用下一后端重复。新增 5 项 JVM 测试覆盖顺序、stale 和不确定失败短路。
+
+构建结果：App 120/120、Selector 18/18、`assembleGkdRelease`、R8、`lintVitalGkdRelease` 全部通过；Release APK SHA-256 `00AA13CD558325E8ECE34EB9A8766430EE769932799AD002E59E44D04AD5E0D8`，3,356,704 字节。
+
+### 14.2 阶段 7 显式特权桥真机动作
+
+2026-07-15 使用系统安装器安装独立 `li.songe.gkd.debug`，未覆盖正式版。设备侧 `base.apk` 与本地 Debug APK SHA-256 均为 `213CBDFADAB3413A0D7DF34D9718C0E18C955A5E8A9517EE965CAC0C7DDB66EB`。SukiSU 管理器最初保留上一轮 UID `10391`，刷新后识别当前 UID `10392`；`run-as` 下 `su -c id` 返回 UID 0。强停并冷启动 Debug 后，APK RootService 连接为 PID `9325`、UID 0、协议 1。
+
+Debug 无障碍与本机 HTTP 检查服务仅在本轮临时开启。B 站回到 `tv.danmaku.bili.MainActivityV2` 后，通过 `/api/execSelector` 对 `@[vid="category_click_area"]` 执行 `clickCenter`：返回 `result=true`、`shell=true`、`state=Completed`、`backend=ApkRoot`、坐标 `(1005.5,274.5)`、display `0`、window `2463`、rotation `0`，`windowBounds` 与 `visibleBounds` 均为 `(0,0)-(1079,2399)`，`retryCount=0`；Activity 随后变为 `com.bilibili.lib.ui.GeneralActivity`。
+
+随后以 root 杀死 PID `9325`，Debug 主进程 PID `29125` 保持运行。返回同一 B 站页面再次执行相同请求，返回 `result=true`、`shell=false`、`state=Completed`、`backend=Accessibility`，并再次只发生一次 `MainActivityV2 → GeneralActivity` 导航；最近日志没有 GKD `AndroidRuntime`。这证明 Binder 已不可用时会在动作提交前安全降级，不改变 `Failed` 不允许跨后端重试的语义。
+
+尝试用内存订阅 `-1/app/9904/0` 验证完整规则链时，Debug 没有获得可信 Task 采样：诊断为 `taskId=null/taskApp=null`、窗口包为 B 站、`confidence=Probable`，150ms 前台确认门正确阻断，未提交动作。Sui 授权在该 Debug 包上未建立，因此本轮不能把直接检查接口结果写成 `ActionVerified` 规则链证据。此处暴露的剩余设计项是：RootService 当前只在设置弹窗按需连接，前台 Task 仍依赖 Shizuku；下一切片需解决常规连接与结构化只读前台采样。
+
+测试后已停止 HTTP 服务并删除内存订阅，移除 ADB 转发，恢复原无障碍绑定状态，卸载 Debug 包并清理 Download 临时文件。最终只剩正式包 `li.songe.gkd`：主进程 PID `4014`、Root UserService PID `28853`/UID 0；`enabled_accessibility_services=null`、`accessibility_enabled=1`。截图证据保存在忽略目录 `local-assets/diagnostics/root-runtime/phase7-bridge/`。
+
+### 14.3 阶段 7 Root 生命周期与前台 Task 构建记录
+
+第四切片新增默认关闭的 `enableApkRoot` 设置；旧 `store.json` 不含字段时保持关闭，开启后应用生命周期绑定普通非 daemon RootService，关闭立即解绑。连接类故障只按 750/1500ms 最多自动重连两次；授权拒绝、身份拒绝、null binding 和 8 秒超时不循环。诊断弹窗在开关关闭时不主动连接，用户显式点击“重新连接”形成的临时连接在关闭弹窗时释放。
+
+Root AIDL 协议从 1 升至 2，新增固定事务 6 `getForegroundTask(displayId)`。返回的 Parcelable 只包含 taskId、userId、effectiveUid、displayId、focused/visible/running/PiP 和前台包/Activity；服务端拒绝负 displayId，每次仍校验 Binder 调用方，不返回窗口节点、规则、订阅、文件或命令。`ForegroundSnapshotProvider` 优先 Root Task，空值或只读 Binder 故障时回退 Shizuku，Accessibility Window 采样和 `Confirmed + Application` 门控保持不变。
+
+自动结果：App 123/123、Selector 18/18、`assembleGkdRelease`、R8、`lintVitalGkdRelease` 全部通过；Release APK SHA-256 `D9004454A4CA806A1DB295446243B0A93D47E05ADF86CD2DB427C881920280C3`，3,356,704 字节。新增测试覆盖 AIDL Task 字段无损映射、旧设置缺字段默认关闭和新设置往返；对应真机结果见下一节。
+
+### 14.4 阶段 7 Root 生命周期与前台 Task 真机验收
+
+2026-07-15 安装独立 `li.songe.gkd.debug`（UID `10393`）。首次启动时 `enableApkRoot` 默认关闭，只有主进程 PID `9222`，未出现 root 子进程，也未主动请求授权。SukiSU 为当前 UID 授权并由用户开启 Root 增强后，冷启动无需进入状态弹窗即出现主进程 PID `30427` 与 APK RootService PID `3725`；状态页确认远端 UID `0`、协议 `2`。
+
+临时关闭 Debug 的 Shizuku 并启用无障碍模式后，先通过 HTTP 安全检查接口对 B 站 `@[vid="category_click_area"]` 执行 `clickCenter`，返回 `result=true`、`shell=true`、`state=Completed`、`backend=ApkRoot`，display `0`、window `2463`、rotation `0`，随后进入 `GeneralActivity`。首次冷启动复验未再次导航，结构化诊断明确显示旧测试组 `-1/app/9905/0` 已达到 `actionMaximum=1`，不是 Task 或选择器失败。换用新组 `-1/app/9906/0` 后，从 `MainActivityV2` 自动进入 `GeneralActivity`；此时 Shizuku 仍关闭，证明协议 2 Root Task、`Confirmed + Application` 门控、规则匹配和 APK Root 输入完整闭环。
+
+生命周期故障注入：杀死 Root PID `13166` 后，Debug 主进程 PID `5204` 全程保持；0.5 秒采样无 root，1.0 秒已自动建立新 Root PID `27212`。随后关闭 Root 增强，持久化值变为 `false`，Root 立即退出且 6 秒内没有重连；重新开启后 2 秒内建立 PID `28481`。这覆盖常规连接、Binder 死亡首轮 750ms 重试、显式停连和恢复；用户拒绝、授权撤销及 8 秒无回调见 14.5 节。
+
+收尾已停止 Debug HTTP 服务、移除 ADB 转发、恢复测试前 store 与无障碍设置并卸载 Debug 包；手机 Download 的 `root-task-*` 和 Debug APK 已清理。最终仅有正式包 `li.songe.gkd`，主进程 PID `4014`、Root UserService PID `28853`/UID 0，正式版数据未改动。截图与本地测试规则保存在 Git 忽略目录 `local-assets/diagnostics/root-runtime/phase7-bridge/`。
+
+### 14.5 阶段 7 拒绝、撤权、更新与回退收口
+
+2026-07-15 再次安装同一独立 Debug APK，SHA-256 `BE03B0A363F1A20443E0902B80C3D1755B6801C1DCE383FCC5C20869DCEBBE9F`，新 UID 为 `10394`。SukiSU 已清理旧 UID，首次启动只有主进程。保持超级用户关闭并开启 Root 增强后，8 秒无回调稳定显示 `失败（connection timeout）`；再观察 10 秒仍无 root 子进程，也没有后台循环请求。设置页和普通导航保持可用。
+
+临时授权并冷启动后，主进程 PID `22745`、UID 0 RootService PID `20360`。从 SukiSU 把当前 UID 的超级用户切为关闭后，内核日志保存 `allow=0`，但 PID `20360` 在 12 秒观察期内持续存活：该管理器不会追溯撤销既有 root 进程的凭据，应用也不会凭空收到 Binder death。随后结束 PID `20360`，0.5～10 秒采样始终没有新 root，主进程保持；下一次绑定因撤权进入不可重试超时。
+
+撤权、Shizuku 关闭且 Debug 无障碍已通过系统设置绑定时，对 B 站 `@[vid="category_click_area"]` 执行安全 `clickCenter` 返回 `result=true`、`shell=false`、`state=Completed`、`backend=Accessibility`、display `0`、window `2682`、rotation `0`，只发生一次 `MainActivityV2 → GeneralActivity`。这证明拒绝/撤权不影响原规则库、设置及无障碍后端。
+
+使用 `pm install -r` 保留数据覆盖同一 Debug APK 后，UID `10394`、`enableApkRoot=true`、无障碍绑定和测试设置均保留；等待 10 秒仍只有主进程 PID `2066`，撤权策略没有被更新绕过。重新授权并冷启动后恢复主进程 PID `23663` 和 UID 0 RootService PID `3653`。SukiSU 的既有进程边界已通过 Root 开关提示处理：要求需要即时撤权的用户先关闭 App 内开关，使普通非 daemon RootService 立即解绑退出。
+
+加入即时撤权提示后的最终自动回归为 App 123/123、Selector 18/18、`assembleGkdRelease`、R8、`lintVitalGkdRelease` 全部通过。Release APK SHA-256 `54AA0B66FFCD3FDC55F55C7029D978EE6DADEC141B1B5786C3F21BBA6703D694`，3,356,704 字节。
+
+最终代码审查又发现“绑定途中显式关闭后，旧 `ServiceConnection` 回调可能覆盖当前状态”的竞态。改为独立连接对象和连接代次门控后，Root 专项单元测试通过；增量 Release APK 的元数据与 v2 签名验证通过，SHA-256 `0A59223FCCF6752D77CF94D8978FCF9FA5A34FDB463B27A07B150E3E57BF3C12`，3,373,088 字节。该审查只收紧客户端生命周期，不修改 AIDL 协议、规则格式、订阅或数据库。

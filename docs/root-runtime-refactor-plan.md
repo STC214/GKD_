@@ -338,13 +338,13 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 任务：
 
 - [x] 选择并固定 root IPC 实现：libsu 6.0.0 普通非 daemon `RootService`。
-- [ ] 定义最小 AIDL：身份握手和结构化输入已完成；前台任务、系统窗口辅助信息仍待后续按需加入。
+- [x] 定义最小 AIDL：身份握手、结构化输入和只读前台 Task 已完成；系统窗口信息继续由无障碍侧提供，不重复扩大 root 接口。
 - [x] 对每次调用校验调用方 UID、包名和共享 UID 下的签名一致性，拒绝第三方 Binder 调用。
 - [x] root 服务不读取和修改订阅数据库，不解析远程规则。
 - [x] root 服务不开放任意 shell 字符串执行接口。
 - [x] 输入动作使用 Parcelable 结构化参数，校验动作类型、displayId、有限坐标、窗口边界和时长。
-- [ ] 处理用户拒绝 root、root 被撤销、Binder 死亡、App 更新和 root 服务重启。
-- [ ] 提供 Root、Shizuku/现有特权通道、纯无障碍三个后端的显式状态和回退顺序。
+- [x] 处理用户拒绝 root、root 被撤销和 App 更新；常规启动连接、Binder 死亡、自动/手动重连及安全回退均已通过。
+- [x] 提供 Root、Shizuku/现有特权通道、纯无障碍三个后端的显式状态和回退顺序，并完成 Root/A11y 两条真机动作验收。
 - [x] 默认使用非 daemon root 服务；只有真机证明生命周期不足时再评估 daemon 模式。
 
 建议回退顺序：
@@ -368,6 +368,12 @@ A11y-only
 当前实现结果（第一最小切片）：固定 `com.github.topjohnwu.libsu:service:6.0.0`，新增四个只读握手方法，客户端校验协议、远端 PID、UID 0 与包名，并监听 Binder 死亡、空 Binder及 8 秒连接超时。服务端每次调用都核对安装 App UID、UID 包列表和签名一致性；没有 shell、路径、输入、订阅或数据库入口。“Root 与授权状态”弹窗按需连接，不影响当前动作后端。Android 16 真机首次连接为 PID `26957`/UID 0/协议 1；杀死后发现 `onServiceDisconnected` 会覆盖 `binder died`，修复并覆盖更新后以 PID `29808` 复测，界面稳定保留 `失败（binder died）`，主进程 PID `20830` 未崩溃；再次连接得到 PID `30430`。强停 Debug 主进程后 root 子进程退出，覆盖更新与卸载后也无残留。App 107/107、Selector 18/18、Release/R8/Vital Lint 通过，最小握手切片完成；阶段 7 继续进入结构化输入。
 
 当前实现结果（第二切片）：AIDL 事务 5 接收 `RootInputRequest` Parcelable，不接受字符串。请求仅含动作类型、displayId、两组坐标、时长及整数窗口边界；服务端先拒绝未知动作、负 displayId、非法边界、NaN/Infinity、半开边界外坐标、超过 10 秒的动作、零时长 swipe 和端点不一致的 tap，再通过系统 `IInputManager` 逐事件注入。结果固定为 Completed/Rejected/Unavailable/Failed。客户端仅在已握手 Binder 上调用，远端异常会清除服务引用并进入失败状态。新增 8 项参数测试后 App 115/115、Selector 18/18、Release/R8/Vital Lint 通过；尚未接入规则链，也未用生产调试后门触发真机输入。
+
+当前实现结果（第三切片）：新增 `PrivilegedInputBridge`，`clickCenter`、`longClickCenter` 和 `swipe` 从阶段 6 的 `ActionExecutionContext` 生成结构化请求，边界取 `windowBounds ∩ visibleBounds`，后端与诊断显式区分 `ApkRoot`、`Shizuku`、`Accessibility`。Root 只有明确 Rejected/Unavailable 才在 guard 复核后尝试 Shizuku；Shizuku 无后端时才允许再次复核并进入无障碍，Binder 异常或逐事件 false 均以 Failed 终止，避免可能已产生副作用的动作被重复提交。新增 5 项顺序/失败语义测试后 App 120/120、Selector 18/18、Release/R8/Vital Lint 通过。Android 16 真机对 B 站 `@[vid="category_click_area"]` 的直接 `clickCenter` 返回 `Completed/ApkRoot` 并导航成功；杀死 root PID `9325` 后主进程 PID `29125` 不崩溃，同一动作返回 `Completed/Accessibility` 且只导航一次。一次性规则链因 Debug 缺少可信 Task 采样而在 `Probable` 前台确认阶段被正确阻断，因此下一切片先处理常规 RootService 连接与可信前台采样，再验收完整规则链。
+
+当前实现结果（第四切片）：新增默认关闭的 `enableApkRoot` 设置和 `RootServiceLifecycle`。开启后应用直接绑定普通非 daemon 服务，不要求先打开诊断弹窗；关闭立即解绑。只有 Binder death/disconnect、binding died、同步绑定或只读调用异常标记为可重试，按 750/1500ms 每进程最多自动重连两次；用户拒绝、身份拒绝、null binding 和 8 秒超时不循环。AIDL 协议升至 2，事务 6 返回 `RootForegroundTask` Parcelable，只包含 task/user/effectiveUid/display、focused/visible/running/PiP 和组件名，不接受命令、路径或规则。前台快照先读 Root Task，再回退 Shizuku，原窗口融合和 `Confirmed + Application` 门控不变。新增 1 项字段映射与 2 项旧设置兼容测试后 App 123/123、Selector 18/18、Release/R8/Vital Lint 通过；Release SHA-256 `D9004454A4CA806A1DB295446243B0A93D47E05ADF86CD2DB427C881920280C3`。Android 16 独立 Debug 包确认默认关闭不启动 root；授权开启后常规连接为 UID 0/协议 2。关闭 Shizuku 后，一次性 B 站规则由 Root Task 达到可信前台并通过 `ApkRoot` 导航成功。Root PID `13166` 被杀后主进程保持，约 1 秒重连为 PID `27212`；关闭开关 6 秒不重连，重开 2 秒内恢复 PID `28481`。第四切片真机验收完成；当时剩余的拒绝、撤权和无回调专项现已由下一段收口。
+
+当前实现结果（最终收口）：未授权 Debug UID `10394` 的连接在 8 秒后稳定为 `connection timeout`，再观察 10 秒没有 root 子进程或循环授权。授权连接 PID `20360` 后从 SukiSU 撤权只写入 `allow=0`，不会追溯杀死既有 UID 0 进程；结束该进程后 10 秒无新 root，主进程保持。撤权且 Shizuku 关闭时，B 站安全点击以 `Completed/Accessibility` 单次完成。保留数据覆盖更新保持 UID、设置与无障碍绑定，但不会绕过撤权；重新授权并冷启动恢复 PID `3653`。由于即时撤权必须由客户端主动解绑，“启用 Root 增强”副标题明确提示先关闭开关。阶段 7 至此完成。
 
 ### 阶段 8：多用户、多显示屏和厂商窗口适配
 
@@ -470,7 +476,7 @@ test(phase-9): ...
 | 4. 前台与焦点窗口融合 | 已完成 | 多任务/窗口融合、覆盖层策略、单调时钟 150ms 确认、规则与动作门控、根错配单次补查及 Activity 来源收口均已完成。 |
 | 5. 窗口与节点恢复 | 已完成 | 有限退避、共享总预算、结构 generation、Content 分支失效、单调短缓存、rotation/display 门控和节点重定位均已接入；米游社/B 站专项真机验收通过。 |
 | 6. 动作执行器增强 | 已完成 | 统一执行器、窗口/显示屏门控、最近父节点策略和只观察验证均已接入；B 站安全导航真机在 104ms 内命中 `Verified/GenerationChanged`，无重复动作。 |
-| 7. APK 内置 RootService | 进行中 | 非 daemon 握手与生命周期已真机通过；结构化 tap/swipe、参数门控和结果码已实现并构建通过，下一步接入显式特权桥并做安全动作验收。 |
+| 7. APK 内置 RootService | 已完成 | 协议 2、完整规则链、有界重连/停连、拒绝/超时、撤权后收口、A11y 回退、覆盖更新和重新授权均已真机通过。 |
 | 8. 多用户与多显示屏 | 未开始 | |
 | 9. 稳定性与维护收口 | 未开始 | |
 

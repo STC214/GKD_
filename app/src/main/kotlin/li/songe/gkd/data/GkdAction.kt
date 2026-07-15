@@ -10,8 +10,11 @@ import li.songe.gkd.a11y.A11yRuleEngine
 import li.songe.gkd.service.A11yService
 import li.songe.gkd.service.GestureDispatchResult
 import li.songe.gkd.service.TrackService
+import li.songe.gkd.root.PrivilegedInputBackend
+import li.songe.gkd.root.PrivilegedInputBridge
+import li.songe.gkd.root.PrivilegedInputOutcome
+import li.songe.gkd.root.PrivilegedInputResult
 import li.songe.gkd.shizuku.casted
-import li.songe.gkd.shizuku.shizukuContextFlow
 import li.songe.gkd.util.ScreenUtils
 
 @Serializable
@@ -61,6 +64,9 @@ enum class ActionTarget {
 enum class ActionBackend {
     Unknown,
     Node,
+    ApkRoot,
+    Shizuku,
+    /** Historical value used by diagnostics emitted before the explicit bridge existed. */
     Root,
     Accessibility,
     Global,
@@ -81,7 +87,23 @@ enum class ActionResultState {
     Cancelled,
     Rejected,
     TimedOut,
+    Failed,
     StaleContext,
+}
+
+private fun PrivilegedInputBackend.toActionBackend() = when (this) {
+    PrivilegedInputBackend.None -> ActionBackend.Unknown
+    PrivilegedInputBackend.ApkRoot -> ActionBackend.ApkRoot
+    PrivilegedInputBackend.Shizuku -> ActionBackend.Shizuku
+}
+
+private fun PrivilegedInputResult.toActionResultState() = when (outcome) {
+    PrivilegedInputOutcome.Completed -> ActionResultState.Completed
+    PrivilegedInputOutcome.Rejected,
+    PrivilegedInputOutcome.Unavailable -> ActionResultState.Rejected
+
+    PrivilegedInputOutcome.Failed -> ActionResultState.Failed
+    PrivilegedInputOutcome.StaleContext -> ActionResultState.StaleContext
 }
 
 private fun GestureDispatchResult.toActionResultState() = when (this) {
@@ -99,6 +121,7 @@ private fun ActionResultState.isSuccessful() = when (this) {
     ActionResultState.Cancelled,
     ActionResultState.Rejected,
     ActionResultState.TimedOut,
+    ActionResultState.Failed,
     ActionResultState.StaleContext -> false
 }
 
@@ -161,7 +184,14 @@ sealed class ActionPerformer(val action: String) {
                 )
             }
             TrackService.addXyPosition(x, y)
-            if (shizukuContextFlow.value.tap(x, y, displayId = context.displayId)) {
+            val privilegedResult = PrivilegedInputBridge.tap(
+                x = x,
+                y = y,
+                duration = 0,
+                context = context,
+                guard = guard,
+            )
+            if (privilegedResult.outcome == PrivilegedInputOutcome.Completed) {
                 return ActionResult(
                     action = action,
                     result = true,
@@ -169,7 +199,24 @@ sealed class ActionPerformer(val action: String) {
                     position = x to y,
                     state = ActionResultState.Completed,
                     target = ActionTarget.Coordinates,
-                    backend = ActionBackend.Root,
+                    backend = privilegedResult.backend.toActionBackend(),
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
+                )
+            }
+            if (privilegedResult.outcome == PrivilegedInputOutcome.StaleContext) {
+                return ActionExecutor.staleResult(this, context)
+            }
+            if (!privilegedResult.canFallback) {
+                return ActionResult(
+                    action = action,
+                    result = false,
+                    shell = privilegedResult.backend != PrivilegedInputBackend.None,
+                    position = x to y,
+                    state = privilegedResult.toActionResultState(),
+                    target = ActionTarget.Coordinates,
+                    backend = privilegedResult.backend.toActionBackend(),
                     displayId = context.displayId,
                     windowId = context.windowId,
                     rotation = context.rotation,
@@ -274,13 +321,14 @@ sealed class ActionPerformer(val action: String) {
                 )
             }
             TrackService.addXyPosition(x, y)
-            if (shizukuContextFlow.value.tap(
-                    x,
-                    y,
-                    LONG_DURATION,
-                    context.displayId,
-                )
-            ) {
+            val privilegedResult = PrivilegedInputBridge.tap(
+                x = x,
+                y = y,
+                duration = LONG_DURATION,
+                context = context,
+                guard = guard,
+            )
+            if (privilegedResult.outcome == PrivilegedInputOutcome.Completed) {
                 return ActionResult(
                     action = action,
                     result = true,
@@ -288,7 +336,24 @@ sealed class ActionPerformer(val action: String) {
                     position = x to y,
                     state = ActionResultState.Completed,
                     target = ActionTarget.Coordinates,
-                    backend = ActionBackend.Root,
+                    backend = privilegedResult.backend.toActionBackend(),
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
+                )
+            }
+            if (privilegedResult.outcome == PrivilegedInputOutcome.StaleContext) {
+                return ActionExecutor.staleResult(this, context)
+            }
+            if (!privilegedResult.canFallback) {
+                return ActionResult(
+                    action = action,
+                    result = false,
+                    shell = privilegedResult.backend != PrivilegedInputBackend.None,
+                    position = x to y,
+                    state = privilegedResult.toActionResultState(),
+                    target = ActionTarget.Coordinates,
+                    backend = privilegedResult.backend.toActionBackend(),
                     displayId = context.displayId,
                     windowId = context.windowId,
                     rotation = context.rotation,
@@ -417,56 +482,52 @@ sealed class ActionPerformer(val action: String) {
                 )
             }
             TrackService.addSwipePosition(startX, startY, endX, endY, swipeArg.duration)
-            return if (shizukuContextFlow.value.swipe(
-                    startX,
-                    startY,
-                    endX,
-                    endY,
-                    swipeArg.duration,
-                    context.displayId,
-                )
-            ) {
-                ActionResult(
+            val privilegedResult = PrivilegedInputBridge.swipe(
+                x1 = startX,
+                y1 = startY,
+                x2 = endX,
+                y2 = endY,
+                duration = swipeArg.duration,
+                context = context,
+                guard = guard,
+            )
+            if (privilegedResult.outcome == PrivilegedInputOutcome.Completed) {
+                return ActionResult(
                     action = action,
                     result = true,
                     shell = true,
                     position = endX to endY,
                     state = ActionResultState.Completed,
                     target = ActionTarget.Coordinates,
-                    backend = ActionBackend.Root,
+                    backend = privilegedResult.backend.toActionBackend(),
                     displayId = context.displayId,
                     windowId = context.windowId,
                     rotation = context.rotation,
                 )
-            } else {
-                if (!guard.isCurrent()) return ActionExecutor.staleResult(this, context)
-                if (!context.supportsAccessibilityGesture) {
-                    return ActionResult(
-                        action = action,
-                        result = false,
-                        position = endX to endY,
-                        target = ActionTarget.Coordinates,
-                        backend = ActionBackend.Accessibility,
-                        displayId = context.displayId,
-                        windowId = context.windowId,
-                        rotation = context.rotation,
-                    )
-                }
-                val gestureDescription = GestureDescription.Builder()
-                val path = Path()
-                path.moveTo(startX, startY)
-                path.lineTo(endX, endY)
-                gestureDescription.addStroke(
-                    GestureDescription.StrokeDescription(
-                        path, 0, swipeArg.duration
-                    )
-                )
-                val state = dispatchGesture(gestureDescription.build(), swipeArg.duration)
-                ActionResult(
+            }
+            if (privilegedResult.outcome == PrivilegedInputOutcome.StaleContext) {
+                return ActionExecutor.staleResult(this, context)
+            }
+            if (!privilegedResult.canFallback) {
+                return ActionResult(
                     action = action,
-                    result = state.isSuccessful(),
+                    result = false,
+                    shell = privilegedResult.backend != PrivilegedInputBackend.None,
                     position = endX to endY,
-                    state = state,
+                    state = privilegedResult.toActionResultState(),
+                    target = ActionTarget.Coordinates,
+                    backend = privilegedResult.backend.toActionBackend(),
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
+                )
+            }
+            if (!guard.isCurrent()) return ActionExecutor.staleResult(this, context)
+            if (!context.supportsAccessibilityGesture) {
+                return ActionResult(
+                    action = action,
+                    result = false,
+                    position = endX to endY,
                     target = ActionTarget.Coordinates,
                     backend = ActionBackend.Accessibility,
                     displayId = context.displayId,
@@ -474,6 +535,27 @@ sealed class ActionPerformer(val action: String) {
                     rotation = context.rotation,
                 )
             }
+            val gestureDescription = GestureDescription.Builder()
+            val path = Path()
+            path.moveTo(startX, startY)
+            path.lineTo(endX, endY)
+            gestureDescription.addStroke(
+                GestureDescription.StrokeDescription(
+                    path, 0, swipeArg.duration
+                )
+            )
+            val state = dispatchGesture(gestureDescription.build(), swipeArg.duration)
+            return ActionResult(
+                action = action,
+                result = state.isSuccessful(),
+                position = endX to endY,
+                state = state,
+                target = ActionTarget.Coordinates,
+                backend = ActionBackend.Accessibility,
+                displayId = context.displayId,
+                windowId = context.windowId,
+                rotation = context.rotation,
+            )
         }
     }
 

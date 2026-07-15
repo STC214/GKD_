@@ -184,13 +184,20 @@ fun AdvancedPage() {
 
     var showShizukuState by vm.showShizukuStateFlow.asMutableState()
     if (showShizukuState) {
-        val onDismissRequest = { showShizukuState = false }
+        val onDismissRequest = {
+            if (!storeFlow.value.enableApkRoot) {
+                RootServiceClient.disconnect()
+            }
+            showShizukuState = false
+        }
         val shizukuContext by shizukuContextFlow.collectAsState()
         val diagnostics by rootBridgeDiagnosticsFlow.collectAsState()
         val reconnecting by rootBridgeReconnectMutex.state.collectAsState()
         val apkRootState by RootServiceClient.state.collectAsState()
-        LaunchedEffect(Unit) {
-            RootServiceClient.connect(context)
+        LaunchedEffect(store.enableApkRoot) {
+            if (store.enableApkRoot) {
+                RootServiceClient.connect(context)
+            }
         }
         AlertDialog(
             title = { Text(text = "Root 与授权状态") },
@@ -446,10 +453,23 @@ fun AdvancedPage() {
                 .verticalScroll(rememberScrollState())
                 .padding(contentPadding),
         ) {
+            Text(
+                text = "APK Root",
+                modifier = Modifier.titleItemPadding(showTop = false),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            TextSwitch(
+                title = "启用 Root 增强",
+                subtitle = "提供结构化输入和可信前台任务；需立即撤权请先关闭此开关",
+                checked = store.enableApkRoot,
+                onCheckedChange = mainVm::switchEnableApkRoot,
+                onClick = null,
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .titleItemPadding(showTop = false),
+                    .titleItemPadding(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(

@@ -5,10 +5,15 @@ import android.app.IActivityManager
 import android.content.Context
 import android.content.Intent
 import li.songe.gkd.util.AndroidTarget
+import rikka.shizuku.SystemServiceHelper
 
 class SafeActivityManager(private val value: IActivityManager) {
     companion object {
         fun newBinder() = getShizukuService(Context.ACTIVITY_SERVICE)?.let {
+            SafeActivityManager(IActivityManager.Stub.asInterface(it))
+        }
+
+        fun newRootBinder() = SystemServiceHelper.getSystemService(Context.ACTIVITY_SERVICE)?.let {
             SafeActivityManager(IActivityManager.Stub.asInterface(it))
         }
     }

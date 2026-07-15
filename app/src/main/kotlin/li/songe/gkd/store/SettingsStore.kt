@@ -14,6 +14,7 @@ data class SettingsStore(
     val enableAutomator: Boolean = false,
     val automatorMode: Int = AutomatorModeOption.A11yMode.value,
     val enableShizuku: Boolean = false,
+    val enableApkRoot: Boolean = false,
     val enableMatch: Boolean = true,
     val enableRuleDiagnostics: Boolean = false,
     val enableStatusService: Boolean = false,

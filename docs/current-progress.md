@@ -20,7 +20,7 @@
 | 4. 前台与焦点窗口融合 | 已完成 | 覆盖层分类、150ms 有界确认、规则查询/动作前门控和结构化诊断已接入；普通应用、SystemUI、输入法、权限弹窗、真实画中画均已真机验收。 |
 | 5. 窗口与节点恢复 | 已完成 | 审查确认的恢复不可达、Content 全局换代、预算重置和缓存时效问题均已修复；米游社/B 站专项采样命中真实缺 root 恢复，未见孤儿事件链、恢复耗尽或崩溃。 |
 | 6. 动作执行器 | 已完成 | 统一执行上下文和 350ms 只观察验证已接入；B 站安全导航真机在 104ms 内命中 `Verified/GenerationChanged`，动作字段完整且无重复提交。 |
-| 7. APK 内置 RootService | 进行中 | 非 daemon 握手/生命周期已真机通过；Parcelable 结构化 tap/swipe、参数校验和结果码已实现并构建通过，尚未接入规则动作链。 |
+| 7. APK 内置 RootService | 已完成 | 协议 2 常规连接、无 Shizuku 完整规则链、有界重连/停连、拒绝/超时、撤权收口、A11y 回退、覆盖更新及重新授权均已真机验收。 |
 | 8～9 | 未开始 | 后续处理多用户、多显示屏和稳定性维护收口。 |
 
 阶段 0 尚未关闭的是规则重复统计、B02 和部分依赖真实 App 时机的窗口样本；这些长期采样不阻止已经具备独立测试证据的可靠性修复继续推进。米游社 B01 已补入基线和诊断文档。
@@ -63,18 +63,28 @@
 - 节点 API 明确拒绝时最多尝试最近一个可见且可点击的父节点；已接受/已完成动作、更多祖先及 back/swipe 等未知副作用动作不自动重复。
 - 成功的 click/longClick/back 等动作最多观察 350ms；节点消失、窗口或 generation 变化升级为 `Verified`，无信号为 `Inconclusive`，两者都不会重复输入。
 - `none`、`swipe` 和失败动作跳过默认验证；无法确认不会被写成 `ActionVerificationFailed`，后者只保留给未来显式、可证明的验证条件。
+- 坐标点击、长按和滑动由 `PrivilegedInputBridge` 显式选择 APK RootService、Shizuku/Sui、无障碍手势；诊断分别记录 `ApkRoot`、`Shizuku`、`Accessibility`。
+- Root 请求边界取已确认窗口与可见区域交集。只有明确拒绝/不可用才允许在窗口 guard 复核后降级；Binder 或逐事件不确定失败不会跨后端重试。
 
 ## 当前构建和真机状态
 
-- 当前 Git HEAD：`abfc9838`；阶段 6 第一批统一动作执行器已于 2026-07-15 13:52 提交，第二批动作验证状态机和文档仍在工作区。
+- 当前 Git HEAD：`ff902ba7`；阶段 6、阶段 7 前两切片及对应文档已提交，第三切片显式特权桥仍在工作区。
 - Release APK：`app/build/outputs/apk/gkd/release/app-gkd-release.apk`
-- 当前本地 APK SHA-256：`49FD98F272AD33A0800B8688AEACB1EDAAEBD54A385A423758115238B6FB3505`
-- APK 大小：3,356,704 字节。
-- App Debug 单元测试：115/115；阶段 7 包含 8 项调用者/身份策略与 8 项结构化输入参数测试。
+- 当前本地 APK SHA-256：`0A59223FCCF6752D77CF94D8978FCF9FA5A34FDB463B27A07B150E3E57BF3C12`
+- APK 大小：3,373,088 字节。
+- App Debug 单元测试：123/123；阶段 7 包含调用者/身份策略、结构化输入参数、特权后端顺序/失败语义、前台 Task AIDL 映射和 2 项旧设置兼容测试。
 - Selector JVM 测试：18/18。
 - Release 构建与 `lintVital`：通过。
 - 阶段 7 使用独立包名 `li.songe.gkd.debug` 真机验收：首次握手 PID `26957`、UID 0、协议 1；修复死亡原因覆盖后 PID `29808` 被杀，主进程 PID `20830` 保持运行并显示 `失败（binder died）`；重连得到 PID `30430`。
-- Debug 包强停后 root 子进程自动退出；覆盖更新时旧进程终止；最终 Debug 包已卸载、手机 Download 临时文件已清理，正式版 PID `4014` 与前台 StatusService 未受影响。
+- 阶段 7 第三切片再次安装独立 Debug 包，设备侧 `base.apk` 与本地 Debug APK SHA-256 均为 `213CBDFADAB3413A0D7DF34D9718C0E18C955A5E8A9517EE965CAC0C7DDB66EB`。SukiSU 刷新旧 UID `10391` 后为当前 UID `10392` 授权，冷启动连接得到 APK RootService PID `9325`、UID 0、协议 1。
+- 在 B 站 `MainActivityV2` 对 `@[vid="category_click_area"]` 执行 `clickCenter`，结果为 `Completed`、`backend=ApkRoot`、`shell=true`、坐标 `(1005.5,274.5)`、display `0`、window `2463`、rotation `0`，窗口/可见边界均为 `(0,0)-(1079,2399)`，随后进入 `GeneralActivity`。
+- 杀死 PID `9325` 后 Debug 主进程 PID `29125` 保持运行；返回同一页面再次执行相同动作，结果为 `Completed`、`backend=Accessibility`、`shell=false`，仍只进入一次 `GeneralActivity`，无新增 GKD `AndroidRuntime`。这验证了 Root 不可用时的无崩溃安全降级，不代表 Binder 不确定失败可以重试。
+- 一次性规则 `-1/app/9904/0` 未进入动作：Debug 未取得可信 Task 采样时快照为 `Probable`，150ms 前台确认门正确阻断。该结果证明规则门控没有为测试放宽，也暴露出普通规则链仍依赖可信前台任务来源。
+- 第四切片独立 Debug 包 UID `10393`：默认关闭时首次启动没有 root 子进程；SukiSU 授权并开启后，无需打开状态弹窗即连接 APK RootService PID `3725`、UID 0、协议 2。关闭 Shizuku 后直接安全点击返回 `Completed/ApkRoot`，完整规则 `-1/app/9906/0` 又从 B 站 `MainActivityV2` 自动导航到 `GeneralActivity`，证明 Root Task 前台确认和 APK Root 输入在无 Shizuku 条件下形成闭环。
+- 首次复验规则 `-1/app/9905/0` 未再次执行并非前台误判：决策诊断明确记录 `RuleActionMaximumReached`；更换新组键后导航成功。杀死 Root PID `13166` 时主进程 `5204` 保持，0.5 秒无 root、1.0 秒出现新 PID `27212`；关闭开关 6 秒无重连，重新开启 2 秒内出现 PID `28481`。
+- 阶段 7 拒绝/超时专项使用 Debug UID `10394`。SukiSU 超级用户关闭时，Root 增强最终显示 `失败（connection timeout）`；额外观察 10 秒仍只有主进程且没有循环请求。外部撤权保存 `allow=0` 后不会追溯杀死既有 UID 0 PID `20360`，这是 SukiSU 的进程级授权语义；结束该 PID 后 10 秒没有新 root，主进程 `22745` 保持。
+- 撤权且 Shizuku 关闭时，B 站安全点击返回 `Completed/Accessibility/shell=false`，只发生一次 `MainActivityV2 → GeneralActivity`。保留数据覆盖更新后 UID `10394`、Root 开关、无障碍绑定和设置均保留，但仍没有 root；重新授权并冷启动后恢复 UID 0 RootService PID `3653`。为避免用户把外部撤权误认为即时终止，Root 开关副标题新增“需立即撤权请先关闭此开关”。
+- Debug 包强停后 root 子进程自动退出；覆盖更新时旧进程终止；两轮验收结束后 Debug 包均已卸载，HTTP 服务、ADB 转发、临时无障碍绑定和手机 Download 测试文件已清理。正式版 PID `4014`、Root UserService PID `28853`/UID 0 与前台 StatusService 未受影响。
 - 测试设备：Xiaomi Android 16，KernelSU + Sui。
 - 最终 Root UserService：UID 0；两个临时探针 App、HTTP 临时服务和 ADB 端口转发均已清除。
 - 当前本地 Release 已非清数据覆盖安装到测试手机；版本 `1.12.1-abfc983-dirty`，阶段 6 安全动作清理并重启后主进程 PID `4014`，Root UserService PID `28853`、UID 0，StatusService 为前台服务。米游社/B 站启动、切换和动态页面滚动后进程稳定，无新增 GKD 崩溃。
@@ -98,6 +108,9 @@
 - 阶段 7 第一最小切片：新增 `root/IRootService.aidl`、`GkdRootService.kt`、`RootServiceClient.kt`、调用者策略和身份策略；固定 libsu 6.0.0。AIDL 只有协议、PID、UID、包名四个只读字段，设置弹窗按需连接，尚未接管输入。
 - 阶段 7 真机审查修复：Binder 死亡会连续触发 DeathRecipient 与 `onServiceDisconnected`；后者现在保留已有具体失败原因，不再把 `binder died` 降级为普通“未连接”。
 - 阶段 7 第二切片：`RootInputRequest` 只携带数值动作、displayId、坐标、时长和窗口边界；AIDL 事务 5 返回 Completed/Rejected/Unavailable/Failed。服务端完成 NaN/Infinity、越界、时长、动作类型和 Tap 规范化门控，尚未从规则链调用。
+- 阶段 7 第三切片：新增 `PrivilegedInputBridge.kt` 和 5 项测试；`GkdAction.kt` 的坐标点击、长按、滑动已接入显式 Root → Shizuku → A11y 顺序，后端诊断拆分且不确定失败禁止重复提交。
+- 阶段 7 第四切片：`SettingsStore.enableApkRoot` 默认关闭，`RootServiceLifecycle` 负责开关驱动连接及最多两次有界重连；AIDL 协议 2 的事务 6 返回 `RootForegroundTask`，`ForegroundSnapshotProvider` 优先 Root Task、回退 Shizuku。旧设置缺字段仍解码为关闭，规则/订阅/数据库结构不变。
+- 阶段 7 最终审查：`RootServiceClient` 改为每次绑定创建独立 `ServiceConnection`，并以连接代次校验回调、超时和死亡通知；显式关闭或新一轮连接后，旧异步回调不能再恢复连接或覆盖当前状态。Root 专项单元测试通过。
 - 构建追溯：`app/build.gradle.kts` 为未提交工作区版本追加 `-dirty`。
 - 动作结果链路：`GkdAction.kt`、`A11yService.kt`、`InputManager.kt`、`InputShellCommand.kt`、`ShizukuApi.kt`、`A11yRuleEngine.kt`。
 - 输入与 Binder 回归：`InputSequenceResult.kt`、`InputSequenceResultTest.kt`、`SafeInvokeShizukuTest.kt`。
@@ -107,19 +120,18 @@
 
 ## 本轮开发停点
 
-- 最后完成项：阶段 7 结构化输入第二切片。参数模型、服务端门控、逐事件注入和结果码已构建通过但未接管动作；App 115/115、Selector 18/18、Release、R8 和 Vital Lint 通过。
+- 最后完成项：阶段 7 全部代码与 Android 16 真机收口。拒绝/无回调不循环、撤权后的进程死亡收口、A11y 回退、覆盖更新和重新授权恢复均已通过；SukiSU 不追溯结束既有 root 进程的边界已在界面和文档明确。最终 App 123/123、Selector 18/18、Release/R8/Vital Lint 通过；最终审查另修复显式关闭与旧绑定回调竞态，Root 专项测试和增量 Release 产物验证通过。当前 Release SHA-256 为 `0A59223FCCF6752D77CF94D8978FCF9FA5A34FDB463B27A07B150E3E57BF3C12`。
 - 首次标题锚点方案被真机探针否定：快照中的 WebView 文本不可供活动选择器查询；文档和测试现以真实 50 节点拓扑为准，不再保留该假设。
 - 下次继续时不需要重复阶段 2 的手势取消、动作计数恢复和订阅哈希验收；只有 APK、签名、规则格式或相关执行链再次变化时才重跑对应基线。
 - 阶段 6 已用 B 站“分区”安全导航完成 `ActionVerified` 验收，不需要为了样本点击米游社签到。`Inconclusive` 与父节点回退仍保留单元测试及未来自然采样，不添加生产调试后门，也不阻塞阶段完成。
-- 当前 APK 为工作区构建 `1.12.1-abfc983-dirty`；阶段 6 第二批代码、真机证据和文档尚未提交。
+- 当前 Release APK 为工作区构建 `1.12.1-ff902ba-dirty`；阶段 7 第三、第四切片代码和文档尚未提交。独立 Debug 包已完成真机验收并卸载，正式版未被覆盖。
 
 ## 下一步
 
-继续阶段 7，按以下顺序实施：
+阶段 7 已完成并通过最终代码审查，后续按以下顺序继续：
 
-1. 抽象 `PrivilegedBridge`，把新 RootService、现有 Shizuku/Sui 和纯无障碍能力做成显式状态与 Root → Shizuku → A11y 顺序。
-2. 将 `RootInputRequest` 从阶段 6 已确认的 display/window/visibleBounds 上下文生成，结果码映射到现有 ActionResultState；动作前继续复核同一窗口令牌。
-3. 先让一次性 B 站安全导航样本进入新 Root 后端，验证逐事件 Completed、350ms 只观察验证和无重复提交，再扩展到普通规则。
-4. 补做用户拒绝 root 与 8 秒无回调超时的真机故障注入；订阅数据库与规则格式保持不变。
+1. 阶段 7 作为一个提交边界保留：AIDL/Root 生命周期/动作桥/Task 采样/测试/文档必须一起提交，不拆出会造成中间不可用状态的子提交；不再扩大 RootService AIDL。
+2. 进入阶段 8，多用户、多显示屏和厂商窗口适配优先从可控 displayId/userId 基线开始。
+3. 阶段 0 的 B02、规则重复统计和剩余窗口自然样本继续并行积累，不阻塞已完成阶段。
 
 详细实施顺序见 [`root-runtime-refactor-plan.md`](root-runtime-refactor-plan.md)，代码级迁移方法见 [`upstream-code-delta-guide.md`](upstream-code-delta-guide.md)，真机证据见 [`testing/root-runtime-baseline.md`](testing/root-runtime-baseline.md)。

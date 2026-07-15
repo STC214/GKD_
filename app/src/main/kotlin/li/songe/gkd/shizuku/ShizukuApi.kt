@@ -184,42 +184,11 @@ class ShizukuContext(
     }
 
     fun getForegroundTask(targetDisplayId: Int = Display.DEFAULT_DISPLAY): ForegroundTask? {
-        val tasks = getTasks(16)
-        if (!AndroidTarget.Q) {
-            return tasks.firstOrNull()?.let { task ->
-                @Suppress("DEPRECATION")
-                ForegroundTask(
-                    taskId = task.id,
-                    userId = currentUserId,
-                    effectiveUid = -1,
-                    displayId = Display.DEFAULT_DISPLAY,
-                    isFocused = true,
-                    isVisible = true,
-                    isRunning = true,
-                    isPictureInPicture = false,
-                    appId = task.topActivity?.packageName,
-                    activityId = task.topActivity?.className,
-                )
-            }
-        }
-        return tasks.mapIndexed { index, task ->
-            val hidden = task.casted
-            ForegroundTask(
-                taskId = hidden.taskId,
-                userId = hidden.userId,
-                // effectiveUid was added to TaskInfo in Android 16.
-                effectiveUid = if (AndroidTarget.BAKLAVA) hidden.effectiveUid else -1,
-                displayId = hidden.displayId,
-                // isFocused/isVisible were added in Android 12. Older releases
-                // can only retain the system-provided task ordering.
-                isFocused = if (AndroidTarget.S) hidden.isFocused else index == 0,
-                isVisible = if (AndroidTarget.S) hidden.isVisible else index == 0,
-                isRunning = hidden.isRunning,
-                isPictureInPicture = hidden.configuration.casted.windowConfiguration.windowingMode == 2,
-                appId = task.topActivity?.packageName,
-                activityId = task.topActivity?.className,
-            )
-        }.let { selectForegroundTask(it, targetDisplayId) }
+        return selectForegroundTaskFromRunningTasks(
+            tasks = getTasks(16),
+            targetDisplayId = targetDisplayId,
+            fallbackUserId = currentUserId,
+        )
     }
 
     fun topCpn(): ComponentName? = getForegroundTask()?.let { task ->
@@ -237,6 +206,45 @@ class ShizukuContext(
         grantSelf()
         serviceWrapper?.let(::onServiceWrapperReady)
     }
+}
+
+fun selectForegroundTaskFromRunningTasks(
+    tasks: List<ActivityManager.RunningTaskInfo>,
+    targetDisplayId: Int,
+    fallbackUserId: Int,
+): ForegroundTask? {
+    if (!AndroidTarget.Q) {
+        return tasks.firstOrNull()?.let { task ->
+            @Suppress("DEPRECATION")
+            ForegroundTask(
+                taskId = task.id,
+                userId = fallbackUserId,
+                effectiveUid = -1,
+                displayId = Display.DEFAULT_DISPLAY,
+                isFocused = true,
+                isVisible = true,
+                isRunning = true,
+                isPictureInPicture = false,
+                appId = task.topActivity?.packageName,
+                activityId = task.topActivity?.className,
+            )
+        }
+    }
+    return tasks.mapIndexed { index, task ->
+        val hidden = task.casted
+        ForegroundTask(
+            taskId = hidden.taskId,
+            userId = hidden.userId,
+            effectiveUid = if (AndroidTarget.BAKLAVA) hidden.effectiveUid else -1,
+            displayId = hidden.displayId,
+            isFocused = if (AndroidTarget.S) hidden.isFocused else index == 0,
+            isVisible = if (AndroidTarget.S) hidden.isVisible else index == 0,
+            isRunning = hidden.isRunning,
+            isPictureInPicture = hidden.configuration.casted.windowConfiguration.windowingMode == 2,
+            appId = task.topActivity?.packageName,
+            activityId = task.topActivity?.className,
+        )
+    }.let { selectForegroundTask(it, targetDisplayId) }
 }
 
 private val defaultShizukuContext by lazy {

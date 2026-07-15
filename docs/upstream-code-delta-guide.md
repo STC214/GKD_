@@ -896,9 +896,11 @@ app/src/main/kotlin/li/songe/gkd/root/RootServiceClient.kt
 app/src/main/kotlin/li/songe/gkd/root/RootServiceIdentity.kt
 app/src/main/kotlin/li/songe/gkd/root/RootCallerVerifier.kt
 app/src/main/kotlin/li/songe/gkd/root/RootInputRequest.kt
+app/src/main/kotlin/li/songe/gkd/root/PrivilegedInputBridge.kt
 app/src/test/kotlin/li/songe/gkd/root/RootServiceIdentityTest.kt
 app/src/test/kotlin/li/songe/gkd/root/RootCallerVerifierTest.kt
 app/src/test/kotlin/li/songe/gkd/root/RootInputRequestTest.kt
+app/src/test/kotlin/li/songe/gkd/root/PrivilegedInputBridgeTest.kt
 ```
 
 预计修改：
@@ -936,7 +938,33 @@ app/src/test/kotlin/li/songe/gkd/root/RootInputRequestTest.kt
 - 独立 Debug APK 最终通过系统安装器完成安装与覆盖更新，正式包未被覆盖。真机首次握手 PID `26957`、UID 0、协议 1；修复双回调状态覆盖后，PID `29808` 被杀时主进程 PID `20830` 保持运行且展示 `失败（binder died）`，重连生成 PID `30430`。强停、覆盖更新和卸载后均无 root daemon 残留；测试包及手机 Download 临时文件已清理。
 - 合并时必须保留死亡原因优先级：DeathRecipient 已写入具体失败时，后续 `onServiceDisconnected` 不得降级成 `Disconnected`；显式 `disconnect()` 仍以 `Disconnected` 收口。
 - 第二切片只允许 Parcelable 数值输入：动作 1=tap、2=swipe；结果 1=Completed、2=Rejected、3=Unavailable、4=Failed。必须保留负 displayId、非法边界、非有限坐标、半开边界越界、时长和非规范 Tap 校验，不能退回 shell 字符串。
-- `SafeInputManager.newRootBinder()` 只在 UID 0 RootService 内取得系统 `IInputManager`；现有 `newBinder()` 和 Shizuku 包装保持不变。规则链尚未调用 `RootServiceClient.performInput()`，合并上游时不能把“接口存在”误写成“Root 已接管动作”。
+- `SafeInputManager.newRootBinder()` 只在 UID 0 RootService 内取得系统 `IInputManager`；现有 `newBinder()` 和 Shizuku 包装保持不变。
+
+第三切片桥接记录（2026-07-15）：
+
+- `GkdAction.ClickCenter/LongClickCenter/Swipe` 已改为调用 `PrivilegedInputBridge`；节点 API、父节点策略和全局返回键保持阶段 6 原路径，不扩大 RootService 动作面。
+- `RootInputRequest` 的授权边界必须取 `ActionExecutionContext.windowBounds.intersect(visibleBounds)`，不能用整屏或仅窗口边界替代；本地构造仍复用服务端同一参数校验器。
+- 后端顺序固定为 APK RootService → Shizuku/Sui → Accessibility，诊断枚举新增 `ApkRoot`、`Shizuku`，旧 `Root` 枚举仅为历史日志兼容保留。上游合并不得再次把两个特权通道合并成一个不可辨识状态。
+- 只有 `Rejected` 或 `Unavailable` 可以进入下一后端，且两次降级前都调用窗口 guard。`Failed` 表示 Binder 事务或输入序列可能已有副作用，必须终止；`RootServiceClient` 的远端异常因此返回 Failed 而非 Unavailable。
+- Shizuku 的 serviceWrapper/inputManager 均不存在时才是 Unavailable；任一后端存在但 tap/swipe 返回 false 时是 Failed，禁止再用无障碍重复动作。
+- 第三切片新增 5 项测试，覆盖 Root 成功短路、不可用降级、两后端间 stale、Root 不确定失败不重试和 Shizuku 失败不可继续。App 120/120、Selector 18/18、Release/R8/Vital Lint 通过。
+- Android 16 真机以 B 站 `@[vid="category_click_area"]` 验证结构化 `clickCenter`：RootService PID `9325` 在线时返回 `Completed/ApkRoot`；杀死该进程后 Debug 主进程 PID `29125` 继续运行，同一动作返回 `Completed/Accessibility`，两次均只发生一次预期导航且无崩溃。
+- 直接动作通过不等于阶段 7 完成。第三切片当时 RootService 仍由设置弹窗按需连接；Debug 缺少 Shizuku Task 采样时完整规则在 `Probable` 前台确认处被阻断。第四切片的修复记录如下，任何合并都不能为了让规则执行而放宽 `Confirmed + Application` 门控。
+
+第四切片生命周期与 Task 记录（2026-07-15）：
+
+- `SettingsStore.enableApkRoot` 默认 `false`，官方旧配置和备份缺字段时仍为关闭；`AdvancedPage` 新增显式开关。不得把默认值改成 `true`，否则升级后可能在无用户意图时弹 root 授权。
+- `RootServiceLifecycle` 在开关开启时绑定、关闭时解绑。`RootServiceState.Failed.retryable` 只标记连接/Binder 类故障，并按 750/1500ms 每进程最多重试两次；拒绝、身份错误、null binding 和 8 秒超时不得循环。
+- AIDL 协议升级为 2，事务 6 固定为 `getForegroundTask(int displayId)`；`RootForegroundTask` 只读字段必须与 `ForegroundTask` 一一对应。合并时若上游已有等价特权 Task API，可复用上游采样，但仍需保留协议校验、调用方校验和无命令接口。
+- `SafeActivityTaskManager/SafeActivityManager` 新增 root 系统 Binder 构造；运行任务映射抽成 `selectForegroundTaskFromRunningTasks`，Shizuku 与 Root 共用 Android 版本兼容分支，禁止以后复制出两套 focused/visible 选择规则。
+- `ForegroundSnapshotProvider` 的顺序为 Root Task → Shizuku Task → 单侧窗口 Probable；窗口仍来自 Accessibility，最终执行门仍为 `Confirmed + Application`。Root Task 读取异常可回退，因为它是无副作用只读操作；这不改变输入 `Failed` 禁止重试的规则。
+- 新增 `RootForegroundTaskTest` 和 `RootSettingsCompatibilityTest` 后 App 123/123、Selector 18/18、Release/R8/Vital Lint 通过。
+- 第四切片 Android 16 真机使用独立 Debug UID `10393`：默认关闭时无 root 子进程；授权开启后无需打开状态弹窗即连接 UID 0、协议 2。关闭 Shizuku 后，内存规则 `-1/app/9906/0` 仍从 B 站 `MainActivityV2` 导航到 `GeneralActivity`，验证 Root Task 与 APK Root 输入完整链。旧组 `9905` 的未再次执行由诊断确认是 `actionMaximum=1` 已耗尽，迁移或复验时必须使用新组键或先清动作状态，不能误判为 Task 失败。
+- 杀死 Root PID `13166` 后主进程 PID `5204` 不变，约 1 秒重连为 PID `27212`；关闭开关后 6 秒不重连，重开 2 秒内连接 PID `28481`。合并时必须同时保留“故障可重试”和“显式关闭不重试”两条语义。第四切片验收时仍保持阶段 7 进行中；其后的拒绝、撤权、8 秒无回调与 App 更新结果见下两条。
+- 最终收口使用 Debug UID `10394`：未授权连接在 8 秒后稳定 `connection timeout`，额外 10 秒没有循环请求。SukiSU 外部撤权只保存 `allow=0`，不会杀死既有 UID 0 RootService；结束旧 PID 后没有重新提权，A11y 安全动作仍以 `Completed/Accessibility` 单次完成。上游合并必须保留 Root 开关的即时解绑语义和撤权提示，不能声称外部管理器一定会追溯杀进程。
+- 保留数据覆盖更新保持 UID、Root 开关和无障碍绑定，但撤权下仍无 root；重新授权冷启动后恢复协议 2 服务。阶段 7 因此完成，后续不得为了探测厂商授权状态而在 AIDL 增加 KernelSU 专用路径、任意 shell 或轮询接口。
+- 最终代码审查补上绑定竞态保护：`RootServiceClient` 每次 `connect()` 必须创建独立 `ServiceConnection` 并递增连接代次，连接回调、8 秒超时和 `DeathRecipient` 只有在代次与当前对象同时匹配时才能改状态。上游迁移时不可退回单例连接回调，否则“绑定途中关闭开关”或快速重连可能被旧回调重新标记为 Connected/Failed。
+- 阶段 7 的提交边界包含 AIDL/Parcelable、RootService 服务端与客户端、生命周期、结构化输入桥、Root Task 前台采样、设置项、测试及对应文档；这些文件应一起迁移，避免出现协议已升级但调用链或默认关闭语义尚未同步的中间版本。
 
 ### 9.8 阶段 8：多用户和多显示屏
 
@@ -1386,12 +1414,12 @@ common/gkd.apk
 
 截至 2026-07-15：
 
-- 当前 HEAD 为 `abfc9838`；阶段 0.5～5、阶段 6 第一批统一动作执行器及对应真机文档均已提交，第二批动作验证状态机仍在工作区。
+- 当前 HEAD 为 `ff902ba7`；阶段 0.5～6 和阶段 7 前两切片已提交，第三切片显式特权桥仍在工作区。
 - 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
 - 阶段 1 已由米游社有效 B01 现场完成闭环：连续查询稳定终止于 `SelectorMiss`，窄范围兼容层随后完成真实未签到点击、弹窗关闭和累计签到天数变化验收。
-- 当前 Release 为 `1.12.1-abfc983-dirty`，SHA-256 `52B32B7C8B06EABB999998556D1716275B6AC8FB61E43B1623ADA8E5429D3315`，3,336,567 字节；App 99/99、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装；安全动作验收清理并重启后主进程 PID `4014`，Root UserService PID `28853`、UID 0，StatusService 为前台服务，最近 10 分钟无新增 GKD `AndroidRuntime`。
+- 当前 Release 为 `1.12.1-ff902ba-dirty`，SHA-256 `0A59223FCCF6752D77CF94D8978FCF9FA5A34FDB463B27A07B150E3E57BF3C12`，3,373,088 字节；App 123/123、Selector 18/18、Release/R8/Vital Lint 全部通过，最终绑定竞态修复另通过 Root 专项测试与增量 Release 产物/签名验证。阶段 7 Debug APK 已完成协议 2、无 Shizuku 完整规则链、重连/停连、拒绝/超时、撤权收口、A11y 回退、覆盖更新和重新授权验收。
 - 真机已恢复 Root/自动化原配置，Root UserService UID 0，临时 HTTP 服务和快照已清除。重启后的 KernelSU `ksu` SELinux 域不能直接读取 App 私有目录，因此本轮未重复宣称配置/订阅文件哈希验收，改用 App 首页实际加载结果作为非清数据证据。
-- 阶段 3、4、5、6 已完成；阶段 7 的非 daemon 握手已真机验收，结构化 tap/swipe 接口与参数门控已实现但未接管规则链，下一步建立显式 PrivilegedBridge 并做安全动作验收。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
+- 阶段 3～7 已完成，阶段 7 最终审查与提交边界整理也已收口；下一步进入阶段 8。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
 - 阶段 6 安全动作最终清理状态覆盖上方早期冒烟快照：触发总数已恢复为测试前的 7727，内存订阅及对应动作日志、临时 HTTP 服务和 ADB 转发均已清除；最终进程与诊断证据以本节上一条 Release 记录和 `current-progress.md` 为准。
 
 最新整体状态以 [`current-progress.md`](current-progress.md) 为入口；本文仍负责记录每项代码级差异和未来上游迁移方法。

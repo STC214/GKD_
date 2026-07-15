@@ -21,7 +21,7 @@ class RootServiceIdentityTest {
     fun rejectsProtocolMismatch() {
         assertEquals(
             RootIdentityFailure.PROTOCOL_MISMATCH,
-            validateRootServiceIdentity(validIdentity.copy(protocolVersion = 2), "li.songe.gkd"),
+            validateRootServiceIdentity(validIdentity.copy(protocolVersion = 99), "li.songe.gkd"),
         )
     }
 

@@ -296,6 +296,10 @@ class MainViewModel : BaseViewModel(), OnSimpleLife by DefaultSimpleLifeImpl() {
         storeFlow.update { s -> s.copy(enableShizuku = value) }
     }
 
+    fun switchEnableApkRoot(value: Boolean) {
+        storeFlow.update { s -> s.copy(enableApkRoot = value) }
+    }
+
     fun requestShizuku() {
         if (shizukuContextFlow.value.ok) return
         if (updateBinderMutex.mutex.isLocked) {

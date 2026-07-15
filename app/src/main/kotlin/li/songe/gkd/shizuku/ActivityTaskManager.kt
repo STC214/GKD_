@@ -5,11 +5,20 @@ import android.app.IActivityTaskManager
 import android.content.ContextHidden
 import android.view.Display
 import li.songe.gkd.util.AndroidTarget
+import rikka.shizuku.SystemServiceHelper
 
 class SafeActivityTaskManager(private val value: IActivityTaskManager) {
     companion object {
         fun newBinder() = if (AndroidTarget.Q) {
             getShizukuService(ContextHidden.ACTIVITY_TASK_SERVICE)?.let {
+                SafeActivityTaskManager(IActivityTaskManager.Stub.asInterface(it))
+            }
+        } else {
+            null
+        }
+
+        fun newRootBinder() = if (AndroidTarget.Q) {
+            SystemServiceHelper.getSystemService(ContextHidden.ACTIVITY_TASK_SERVICE)?.let {
                 SafeActivityTaskManager(IActivityTaskManager.Stub.asInterface(it))
             }
         } else {

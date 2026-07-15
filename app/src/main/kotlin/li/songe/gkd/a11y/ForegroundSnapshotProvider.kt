@@ -6,6 +6,7 @@ import li.songe.gkd.runtime.foreground.ForegroundSnapshot
 import li.songe.gkd.runtime.foreground.ForegroundWindow
 import li.songe.gkd.runtime.foreground.ForegroundWindowKind
 import li.songe.gkd.runtime.foreground.resolveForegroundSnapshot
+import li.songe.gkd.root.RootServiceClient
 import li.songe.gkd.shizuku.shizukuContextFlow
 import li.songe.gkd.util.AndroidTarget
 
@@ -13,7 +14,8 @@ fun A11yCommonImpl.captureForegroundSnapshot(
     targetDisplayId: Int = Display.DEFAULT_DISPLAY,
     timestamp: Long = System.currentTimeMillis(),
 ): ForegroundSnapshot {
-    val task = shizukuContextFlow.value.getForegroundTask(targetDisplayId)
+    val task = RootServiceClient.getForegroundTask(targetDisplayId)
+        ?: shizukuContextFlow.value.getForegroundTask(targetDisplayId)
     val windows = runCatching { windowInfos }.getOrDefault(emptyList()).mapNotNull { window ->
         val displayId = if (AndroidTarget.TIRAMISU) {
             window.displayId

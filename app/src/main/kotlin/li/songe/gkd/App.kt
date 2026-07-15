@@ -32,6 +32,7 @@ import li.songe.gkd.a11y.initA11yFeat
 import li.songe.gkd.data.CrashData
 import li.songe.gkd.data.selfAppInfo
 import li.songe.gkd.notif.initChannel
+import li.songe.gkd.root.initRootServiceLifecycle
 import li.songe.gkd.service.clearHttpSubs
 import li.songe.gkd.service.initA11yWhiteAppList
 import li.songe.gkd.shizuku.initShizuku
@@ -239,6 +240,7 @@ class App : Application() {
         }
         initToast()
         initStore()
+        initRootServiceLifecycle()
         initChannel()
         initAppState()
         initA11yFeat()
