@@ -53,7 +53,12 @@ fun resolveForegroundSnapshot(
             ForegroundConfidence.Conflict
         }
 
-        taskAppId != null && windowAppId == taskAppId && window.isFocused -> {
+        taskAppId != null &&
+                windowAppId == taskAppId &&
+                task.isFocused &&
+                task.isVisible &&
+                task.isRunning &&
+                window.isFocused -> {
             ForegroundConfidence.Confirmed
         }
 

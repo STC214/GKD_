@@ -40,9 +40,9 @@
 | 官方 HEAD 标题 | `fix: UserInfo name is null` |
 | 当前 fork 仓库 | `https://github.com/STC214/GKD_.git` |
 | 当前 fork 分支 | `main` |
-| 当前 fork HEAD | `f2e60bd0e16fbaed416663b09d0c13aa6473c2df` |
+| 当前 fork HEAD | `ee8c484cc7f765ffa4d641711edcb72b205c9396` |
 | 共同祖先 | `0b75375c0f40df62e93866e0e157d4e1ebc45c67` |
-| 分叉关系 | 相对上述官方基线，fork 领先 11 个提交；官方实时领先数本轮未刷新 |
+| 分叉关系 | 相对上述官方基线，fork 领先 12 个提交；官方实时领先数本轮未刷新 |
 | 当前应用版本 | `1.12.1` |
 | 当前 Git remote | 只有 `origin`，尚未持久配置 `upstream` |
 
@@ -129,6 +129,7 @@ git rev-list --left-right --count FETCH_HEAD...HEAD
 | 9 | `b829f66b` | Root 桥真实性、结构化诊断、基线与维护文档 | 保留诊断行为；按新上游控制流重新挂接旁路记录 |
 | 10 | `d33249d1` | Root 回调竞态、外部服务契约与诊断收口 | 保留连接代际和服务启动边界，避免恢复迟到回调 |
 | 11 | `f2e60bd0` | 动作结果可信化、诊断导出与当前进度入口 | 保留真实完成/取消结果和失败不触发规则语义 |
+| 12 | `ee8c484c` | 米游社兼容、规则汇总补查、查询唤醒状态机和阶段 4 第一批前台模型 | 按 9.2～9.4 的不变量迁移；本轮审查修复仍在工作区 |
 
 整合上游时可以使用：
 
@@ -142,7 +143,7 @@ git range-diff "$base..upstream/main" "$base..HEAD"
 
 ## 6. 当前已提交文件级差异索引
 
-相对上述官方基线的当前 HEAD 已提交差异共涉及 53 个文件。下表保留最早的模块、截图资源和仓库卫生差异；阶段 0.5、1、2 的新增运行时文件与符号由第 9 节逐项列出，不能再把本表的 19 项误读为完整文件清单。每次整合前使用以下命令生成实时全集：
+相对上述官方基线的当前 HEAD 已提交差异共涉及 67 个文件。下表保留最早的模块、截图资源和仓库卫生差异；阶段 0.5～4 的新增运行时文件与符号由第 9 节逐项列出，不能再把本表的早期条目误读为完整文件清单。每次整合前使用以下命令生成实时全集：
 
 ```powershell
 $base = git merge-base upstream/main HEAD
@@ -674,7 +675,7 @@ rg -n "dispatchGesture|performAction\(|injectInputEvent|rule\.trigger\(" app/src
 
 ### 9.2.1 米游社第三方规则选择器兼容层
 
-状态：`WORKTREE`（2026-07-15 原神/绝区零与星穹铁道两类旧选择器均已建立兼容；星铁未签到页已完成真机端到端验收）。
+状态：`CURRENT`（提交 `ee8c484c`；2026-07-15 原神/绝区零与星穹铁道两类旧选择器均已建立兼容；星铁未签到页已完成真机端到端验收）。
 
 新增：
 
@@ -720,10 +721,11 @@ app/src/test/kotlin/li/songe/gkd/data/RuleSelectorCompatTest.kt
 
 #### 9.2.1.1 规则汇总晚于自动化连接时的补查
 
-状态：`WORKTREE`，已由同一星铁静止页面完成真机验收。
+状态：`CURRENT`（提交 `ee8c484c`）+ `WORKTREE` 审查修复；已由同一星铁静止页面完成真机验收。
 
 - `A11yState.kt`：新增 `ActivityScene.RuleSummary`，使同一前台 Activity 在规则汇总变化时重建 `ActivityRule`，但不伪造屏幕点亮或 App 切换。
-- `A11yFeat.kt`：`initRuleSummaryRefresh()` 监听 `ruleSummaryFlow.drop(1)`；仅当汇总对象确实变化时，在 `topActivityFlow` 锁内刷新当前规则，然后通知引擎补查。
+- `A11yFeat.kt`：`initRuleSummaryRefresh()` 通过 `collectRuleSummaryUpdates` 监听包含当前值在内的 `ruleSummaryFlow`；仅当汇总对象确实变化时，在 `topActivityFlow` 锁内刷新当前规则，然后通知引擎补查。禁止使用 `drop(1)`，因为真实汇总可能在异步 collector 订阅前已经加载。
+- `RuleSummaryRefresh.kt` / `RuleSummaryRefreshTest.kt`：固定“晚订阅仍收到已加载汇总”的不变量，防止再次引入首值丢失。
 - `A11yRuleEngine.kt`：`onRuleSummaryChanged()` 使用既有 `startQueryJob(byForced=true)`，继续服从服务状态、自动匹配开关、forcedTime、规则状态、前台校验和查询互斥。
 - 故障证据：旧版启动日志先显示米游社前台，但 `activityRuleFlow` 只有 4 条全局规则；应用规则稍后进入 `ruleSummaryFlow` 后没有查询。修复版在应用列表更新后记录 `scene=RuleSummary`，立即加载 `667/app/8` 并完成签到。
 - 上游迁移：若上游已在规则汇总变化时原子刷新当前 Activity 并补查，删除本监听和 `ActivityScene.RuleSummary`；不要保留两套 collector，以免重复 forced query。
@@ -732,7 +734,7 @@ app/src/test/kotlin/li/songe/gkd/data/RuleSelectorCompatTest.kt
 
 ### 9.2.2 脏工作区 APK 可追溯版本
 
-状态：`WORKTREE`。
+状态：`CURRENT`（提交 `ee8c484c`）。
 
 修改：`app/build.gradle.kts` 的 `GitInfo` 新增 `isDirty`，由 `git status --porcelain --untracked-files=normal` 计算。版本后缀规则为：
 
@@ -743,11 +745,11 @@ app/src/test/kotlin/li/songe/gkd/data/RuleSelectorCompatTest.kt
 | 精确 tag、工作区干净 | 无额外后缀 |
 | 精确 tag、工作区有修改 | `-dirty` |
 
-该差异只改变构建产物标识，不修改 `versionCode`、订阅格式、数据库或签名。正式提交后工作区恢复干净，APK 自动回到新提交短哈希；上游若已有等价 dirty 标识，采用上游实现并删除本差异。当前 APK manifest 已验证为 `versionCode=92`、`versionName=1.12.1-f2e60bd-dirty`。
+该差异只改变构建产物标识，不修改 `versionCode`、订阅格式、数据库或签名。正式提交后工作区恢复干净，APK 自动回到新提交短哈希；上游若已有等价 dirty 标识，采用上游实现并删除本差异。当前 APK manifest 已验证为 `versionCode=92`、`versionName=1.12.1-ee8c484-dirty`。
 
 ### 9.3 阶段 3：查询唤醒状态机
 
-状态：`WORKTREE`，已于 2026-07-15 完成代码、单元测试和真机事件风暴冒烟。
+状态：`CURRENT`（提交 `ee8c484c`），已于 2026-07-15 完成代码、单元测试和真机事件风暴冒烟。
 
 新增文件：
 
@@ -777,7 +779,7 @@ app/src/test/kotlin/li/songe/gkd/data/RuleSelectorCompatTest.kt
 
 ### 9.4 阶段 4：焦点融合
 
-状态：`WORKTREE`，第一批任务/窗口采样模型已于 2026-07-15 完成；尚未接管规则上下文。
+状态：`CURRENT`（提交 `ee8c484c`）+ `WORKTREE` 审查修复；第一批任务/窗口采样模型已于 2026-07-15 完成，尚未接管规则上下文。
 
 已新增：
 
@@ -793,9 +795,11 @@ a11y/ForegroundSnapshotProvider.kt
 - `ShizukuApi.kt`：由 `getTasks(1).firstOrNull()` 改为查询 16 条候选，优先选择目标显示屏上 focused、visible、running 的任务；Android 9 保留旧顺序回退，Android 10/11 因系统尚无 focused/visible 字段而显式使用第一条任务作为兼容焦点，Android 12～15 不读取 Android 16 才加入的 effectiveUid。
 - `TaskStackListener.kt`：taskId 回调使用选择后的任务，不再再次假设第一条正确。
 
-`ForegroundSnapshotProvider` 从 focused Accessibility Window 采集窗口 ID、类型、层级、displayId、active 状态和 root 包名；同屏没有 focused 窗口时才回退 active 窗口。`ForegroundSnapshot` 在 Task 与 focused root 包一致时为 `Confirmed`，包冲突时为 `Conflict` 且 `canExecute=false`，只有单侧证据或 active 窗口时为 `Probable`。
+`ForegroundSnapshotProvider` 从 focused Accessibility Window 采集窗口 ID、类型、层级、displayId、active 状态和 root 包名；同屏没有 focused 窗口时才回退 active 窗口。`ForegroundSnapshot` 只有在 Task 同时 focused、visible、running 且与 focused root 包一致时才为 `Confirmed`；包冲突时为 `Conflict` 且 `canExecute=false`，非焦点回退任务、单侧证据或 active 窗口均为 `Probable`。
 
-新增 14 项测试覆盖任务优先级、跨显示屏过滤、窗口焦点/层级和快照置信度。全量 App 53/53、Selector 18/18、Release 与 Vital Lint 通过；Android 16 覆盖安装并在 GKD/米游社之间触发 TaskStack，未出现隐藏字段错误，Root UserService 仍为 UID 0。
+`TaskStackListener` 的 taskId 和 taskInfo 两个系统回调都只作为“任务状态变化”信号，随后调用同一 `getForegroundTask()` 重新采样；禁止再次直接信任回调顺序或 `taskInfo.topActivity`，否则会绕过多任务选择器。
+
+前台模型共 16 项测试覆盖任务优先级、跨显示屏过滤、窗口焦点/层级、快照置信度和非焦点/不可见/停止任务不得确认；规则汇总另有 1 项晚订阅测试。全量 App 56/56、Selector 18/18、Release 与 Vital Lint 通过；Android 16 覆盖安装并在 GKD/米游社之间触发 TaskStack，未出现隐藏字段错误，Root UserService 仍为 UID 0。
 
 下一批预计修改：
 
@@ -1320,10 +1324,10 @@ common/gkd.apk
 
 截至 2026-07-15：
 
-- 当前 HEAD 为 `f2e60bd0`；已提交阶段 0.5、1、2，米游社选择器兼容代码、测试和本轮文档仍在工作区，尚未提交。
+- 当前 HEAD 为 `ee8c484c`；阶段 0.5～3、米游社兼容和阶段 4 第一批已提交。本轮规则汇总、快照确认和 TaskStack 旁路修复及文档仍在工作区，尚未提交。
 - 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
 - 阶段 1 已由米游社有效 B01 现场完成闭环：连续查询稳定终止于 `SelectorMiss`，窄范围兼容层随后完成真实未签到点击、弹窗关闭和累计签到天数变化验收。
-- 当前 Release 为 `1.12.1-f2e60bd-dirty`，SHA-256 `8812A0E6AC2C977B2081548FCDB054AF23658FDFD9407D6C364B2BCA3E69A546`，3,320,191 字节；App 53/53、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装：主进程 PID `1809`，Root UserService PID `1872`、UID 0，StatusService 为前台；GKD/米游社 TaskStack 往返后进程稳定，无隐藏字段错误或新增 GKD `AndroidRuntime`。
+- 当前 Release 为 `1.12.1-ee8c484-dirty`，SHA-256 `E00AD97B656F37FE7C21D23472292674EA38A3DA25A7724BE9C4623A658897F8`，3,320,195 字节；App 56/56、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装：主进程 PID `15270`，Root UserService PID `15379`、UID 0，StatusService 为前台；GKD/米游社 TaskStack 往返后进程稳定，无隐藏字段错误或新增 GKD `AndroidRuntime`。
 - 真机已恢复 Root/自动化原配置，Root UserService UID 0，临时 HTTP 服务和快照已清除。重启后的 KernelSU `ksu` SELinux 域不能直接读取 App 私有目录，因此本轮未重复宣称配置/订阅文件哈希验收，改用 App 首页实际加载结果作为非清数据证据。
 - 阶段 3 已完成；阶段 4 第一批多任务选择、焦点窗口/root 包采集和统一置信度模型已完成，下一步实现覆盖层策略、冲突延迟确认和规则上下文接入。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
 

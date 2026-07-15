@@ -110,6 +110,35 @@ class ForegroundSnapshotTest {
     }
 
     @Test
+    fun `matching focused window cannot confirm fallback non-focused task`() {
+        val snapshot = resolveForegroundSnapshot(
+            task.copy(isFocused = false),
+            listOf(window(3, "host.app", focused = true)),
+            targetDisplayId = 0,
+            timestamp = 123,
+        )
+        assertEquals(ForegroundConfidence.Probable, snapshot.confidence)
+        assertFalse(snapshot.canExecute)
+    }
+
+    @Test
+    fun `matching focused window cannot confirm invisible or stopped task`() {
+        listOf(
+            task.copy(isVisible = false),
+            task.copy(isRunning = false),
+        ).forEach { invalidTask ->
+            val snapshot = resolveForegroundSnapshot(
+                invalidTask,
+                listOf(window(3, "host.app", focused = true)),
+                targetDisplayId = 0,
+                timestamp = 123,
+            )
+            assertEquals(ForegroundConfidence.Probable, snapshot.confidence)
+            assertFalse(snapshot.canExecute)
+        }
+    }
+
+    @Test
     fun `task without window is probable`() {
         val snapshot = resolveForegroundSnapshot(
             task,

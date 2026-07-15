@@ -34,10 +34,8 @@ object FixedTaskStackListener : ITaskStackListener.Stub() {
 
     private val defaultFront = 0L to ComponentName("", "")
     private var lastFront = defaultFront
-    private fun onTaskMovedToFrontCompat(
-        cpn: ComponentName? = null
-    ): Unit = synchronized(topActivityFlow) {
-        val cpn = cpn ?: shizukuContextFlow.value.topCpn() ?: return
+    private fun onTaskMovedToFrontCompat(): Unit = synchronized(topActivityFlow) {
+        val cpn = shizukuContextFlow.value.topCpn() ?: return
         lastFront = System.currentTimeMillis() to cpn
         updateTopActivity(
             appId = cpn.packageName,
@@ -47,19 +45,16 @@ object FixedTaskStackListener : ITaskStackListener.Stub() {
     }
 
     override fun onTaskMovedToFront(taskId: Int) {
-        val task = shizukuContextFlow.value.getForegroundTask() ?: return
-        if (task.taskId != taskId) {
-            return
-        }
-        val appId = task.appId ?: return
-        val activityId = task.activityId ?: return
-        onTaskMovedToFrontCompat(ComponentName(appId, activityId))
+        // The callback only signals that task state changed. Re-sample the focused task instead of
+        // trusting callback ordering or assuming the moved task owns focus.
+        onTaskMovedToFrontCompat()
     }
 
     override fun onTaskMovedToFront(taskInfo: ActivityManager.RunningTaskInfo) {
         if (AndroidTarget.Q && taskInfo.casted.displayId != Display.DEFAULT_DISPLAY) {
             return
         }
-        onTaskMovedToFrontCompat(taskInfo.topActivity)
+        // Keep both platform callback variants on the same foreground-selection path.
+        onTaskMovedToFrontCompat()
     }
 }

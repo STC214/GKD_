@@ -306,6 +306,14 @@ WebView >4 View[childCount=10]
 
 APK 非清数据覆盖安装到 Android 16 测试机后，主进程 PID `1809`，Root UserService PID `1872`、UID 0。先启动 GKD 主界面，再把已有米游社任务带回前台，TaskStack 路径完成两次切换；没有 `NoSuchFieldError`、`NoSuchMethodError` 或 GKD `AndroidRuntime`。本批模型尚未接管规则上下文，下一次验收需覆盖输入法/SystemUI/权限弹窗/画中画策略和冲突延迟确认。
 
+### 6.6 阶段 4 第一批审查修复验收
+
+审查发现并修复三条控制流缺口：规则汇总 collector 不再使用可能丢掉已加载真实首值的 `drop(1)`；`Confirmed` 现在同时要求 Task focused、visible、running 和 focused Window root 包一致；TaskStack 的 taskId/taskInfo 两个回调统一重新采样 `getForegroundTask()`，不再直接信任回调任务或 `topActivity`。
+
+新增 `RuleSummaryRefreshTest` 1 项，覆盖 collector 晚于真实汇总加载仍收到当前值；`ForegroundSnapshotTest` 增加 2 项，覆盖非 focused、不可见和停止任务不得确认。全量结果为 App 56/56、Selector JVM 18/18、Release 与 Vital Lint 通过。
+
+最终 APK 为 `1.12.1-ee8c484-dirty`，SHA-256 `E00AD97B656F37FE7C21D23472292674EA38A3DA25A7724BE9C4623A658897F8`，3,320,195 字节。非清数据覆盖安装后主进程 PID `15270`，Root UserService PID `15379`、UID 0，StatusService 为前台。启动 GKD 后恢复已有米游社任务，两个进程保持存活，前台恢复为 `com.mihoyo.hyperion/.main.HyperionMainActivity`，无新增隐藏字段错误、方法错误或 GKD `AndroidRuntime`。
+
 ## 7. 固定窗口场景
 
 | 场景 | 测试步骤 | 当前前台判断 | 规则结果 | 证据路径 |

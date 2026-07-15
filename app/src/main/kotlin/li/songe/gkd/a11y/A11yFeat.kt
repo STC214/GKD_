@@ -150,7 +150,7 @@ private fun initRuleChangedLog() {
 
 private fun initRuleSummaryRefresh() {
     appScope.launch(Dispatchers.Default) {
-        ruleSummaryFlow.drop(1).collect { summary ->
+        ruleSummaryFlow.collectRuleSummaryUpdates { summary ->
             val changed = synchronized(topActivityFlow) {
                 if (activityRuleFlow.value.ruleSummary === summary) {
                     false
