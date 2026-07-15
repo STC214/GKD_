@@ -6,7 +6,7 @@
 
 项目已经完成 Root 桥真实性与自恢复、结构化规则诊断，以及动作结果可信化改造。米游社星穹铁道未签到页已完成端到端验收：修复第三方旧选择器、规则汇总晚于自动化连接时不补查的启动竞态，并为慢响应页面增加窄范围防重复冷却。所有兼容均不改写订阅文件。当前安装在测试手机上的 GKD 仍以普通 App 身份保留原版订阅、数据库和备份能力，同时通过 UID 0 的 Root UserService 执行特权操作。
 
-阶段 3“查询唤醒状态机”已经完成。阶段 4“前台与焦点窗口融合”已进入实施：多任务候选选择、焦点窗口/root 包采集和统一置信度模型已完成第一批代码；审查发现的规则汇总晚订阅、非焦点任务误确认和 TaskStack 回调旁路均已修复，但快照尚未接管规则上下文。
+阶段 3“查询唤醒状态机”和阶段 4“前台与焦点窗口融合”均已完成。多任务候选、焦点窗口/root 包、统一置信度、覆盖层分类、单调时钟 150ms 有界确认及规则动作门控已形成单一链路；最终审查又收口了根错配无限补查、旧空规则集提前拦截、事件 Activity 覆盖 Task Activity 三条控制流缺口。Android 16 的输入法、权限控制器和真实画中画特殊拓扑均已形成回归测试并由最终 APK 重放。
 
 ## 阶段状态
 
@@ -17,7 +17,7 @@
 | 1. 结构化决策诊断 | 已完成 | 米游社有效 B01 在窗口 root 可用后持续终止于 `SelectorMiss`，没有动作提交；诊断已完成真实漏执行闭环。 |
 | 2. 动作结果误判修复 | 已完成 | Root 输入逐事件返回真实结果，无障碍手势区分完成/取消/拒绝/超时；失败不消耗规则次数或冷却。 |
 | 3. 查询唤醒状态机 | 已完成 | 单 runner、有界 pending、最新事件补查、常量空间事件缓冲和规则晚加载补查均已实现并验证。 |
-| 4. 前台与焦点窗口融合 | 进行中 | 已完成 Task 隐藏字段、多候选选择、焦点窗口/root 包采集和 `ForegroundSnapshot`；覆盖层策略、冲突延迟确认及规则接入待完成。 |
+| 4. 前台与焦点窗口融合 | 已完成 | 覆盖层分类、150ms 有界确认、规则查询/动作前门控和结构化诊断已接入；普通应用、SystemUI、输入法、权限弹窗、真实画中画均已真机验收。 |
 | 5～9 | 未开始 | 按主计划依次处理窗口恢复、动作增强、内置 RootService、多用户和稳定性收口。 |
 
 阶段 0 尚未关闭的是规则重复统计、B02 和部分依赖真实 App 时机的窗口样本；这些长期采样不阻止已经具备独立测试证据的可靠性修复继续推进。米游社 B01 已补入基线和诊断文档。
@@ -42,19 +42,24 @@
 - Task 前台判断查询最多 16 条候选，并在 Android 12+ 优先选择目标显示屏上 focused、visible、running 的任务；Android 10/11 因平台缺少字段而明确保留任务顺序回退。
 - `ForegroundSnapshot` 同时保留 taskId、userId、displayId、windowId、Activity 和焦点窗口 root 包；Task/窗口包冲突时标记 `Conflict` 且 `canExecute=false`。
 - 只有 focused、visible、running 的 Task 与 focused Window root 包一致时才产生 `Confirmed`；TaskStack 两种系统回调都重新采样同一个前台选择器。
+- 窗口 surface 显式区分普通应用、输入法、SystemUI、权限控制器、画中画、无障碍覆盖层和其他系统覆盖层；只有 `Confirmed + Application` 允许执行。
+- Task/窗口冲突仅等待一次 150ms 并合并复查，同一冲突到期即拒绝，不做周期轮询。
+- 根节点包持续错配时，每个 task/window/root 上下文最多补查一次；延迟确认在空规则检查前先应用新前台。
+- TaskStack Activity 非空时保持权威，状态事件只在 Activity 缺失时兜底；确认期限使用单调时钟。
+- 规则查询和动作提交前都重新确认同一融合快照；taskId、windowId 或 appId 变化时以 `StaleContext` 终止。
 
 ## 当前构建和真机状态
 
-- 当前 Git HEAD：`ee8c484c`；阶段 3、米游社兼容和阶段 4 第一批已提交，本轮三项审查修复、测试和文档仍在工作区，尚未提交。
+- 当前 Git HEAD：`3d7e18e3`；阶段 3、米游社兼容和阶段 4 第一批审查修复已提交，本轮覆盖层分类、150ms 确认、规则接入、测试和文档仍在工作区，尚未提交。
 - Release APK：`app/build/outputs/apk/gkd/release/app-gkd-release.apk`
-- 当前本地 APK SHA-256：`E00AD97B656F37FE7C21D23472292674EA38A3DA25A7724BE9C4623A658897F8`
-- APK 大小：3,320,195 字节。
-- App Debug 单元测试：56/56；本轮新增 1 项晚订阅规则汇总测试和 2 项非焦点/不可见/停止任务不得确认测试。
+- 当前本地 APK SHA-256：`F0814E2C6A33DEA4DE2AE79A4CDDEE2DC4F2D963F6E48F92EC05354D6B189EC1`
+- APK 大小：3,320,187 字节。
+- App Debug 单元测试：72/72；除覆盖层/确认及真实拓扑回归外，新增根错配单次补查、Activity 来源和墙上时间回拨测试。
 - Selector JVM 测试：18/18。
 - Release 构建与 `lintVital`：通过。
 - 测试设备：Xiaomi Android 16，KernelSU + Sui。
-- 最终 Root UserService：UID 0；HTTP 临时服务、ADB 端口转发和本轮 6 份设备快照均已清除。
-- 当前本地 Release 已非清数据覆盖安装到测试手机；版本 `1.12.1-ee8c484-dirty`，主进程 PID `15270`，Root UserService PID `15379`、UID 0。GKD 与米游社往返触发两个 TaskStack 路径后进程稳定，Android 16 未出现隐藏字段错误。
+- 最终 Root UserService：UID 0；两个临时探针 App、HTTP 临时服务和 ADB 端口转发均已清除。
+- 当前本地 Release 已非清数据覆盖安装到测试手机；版本 `1.12.1-3d7e18e-dirty`，主进程 PID `20425`，Root UserService PID `2793`、UID 0。安装后显式重启主进程和 Root UserService，StatusService 保持前台，Android 16 未出现 GKD 崩溃。
 - 手机重启后 KernelSU `u:r:ksu:s0` 被 SELinux 拒绝直接读取 App 私有目录，因此本轮没有重复声称文件哈希一致；非清数据证据来自 App 自身成功加载原订阅与动作计数。
 - 最终检查无新增 GKD `AndroidRuntime` 崩溃。
 
@@ -63,7 +68,7 @@
 - 米游社兼容：`RuleSelectorCompat.kt`、`ResolvedRule.kt`、`RuleSelectorCompatTest.kt`；原神/绝区零保留“每日签到”标题锚点，星铁使用 `6 + 3 + TextView` 奖励结构签名并设置 5 秒最短冷却。
 - 启动补查：`A11yState.kt`、`A11yFeat.kt`、`RuleSummaryRefresh.kt`、`A11yRuleEngine.kt` 在规则汇总晚加载后刷新当前 Activity 规则并 forced query；监听包含订阅时的当前值，不再使用 `drop(1)`。
 - 查询唤醒：新增 `QueryWakeState.kt` 和 `QueryWakeStateTest.kt`；`A11yRuleEngine.kt` 使用有界 pending handoff，`DecisionReason.kt` 新增 `QueryDeferred`。
-- 前台融合第一批：`TaskInfoHidden.java` 补齐任务字段；`ForegroundTask.kt`、`ForegroundSnapshot.kt`、`ForegroundSnapshotProvider.kt` 建立多任务/窗口采样；Task 必须 focused、visible、running 才能确认，两个 TaskStack 回调统一重采样。
+- 前台融合：`TaskInfoHidden.java`、`WindowConfiguration.java` 补齐任务和画中画字段；`ForegroundTask.kt`、`ForegroundSnapshot.kt`、`ForegroundSnapshotProvider.kt` 建立多任务、窗口和覆盖层采样；`ForegroundConfirmationState.kt` 提供 150ms 有界确认；`A11yRuleEngine.kt` 统一查询和动作门控。
 - 构建追溯：`app/build.gradle.kts` 为未提交工作区版本追加 `-dirty`。
 - 动作结果链路：`GkdAction.kt`、`A11yService.kt`、`InputManager.kt`、`InputShellCommand.kt`、`ShizukuApi.kt`、`A11yRuleEngine.kt`。
 - 输入与 Binder 回归：`InputSequenceResult.kt`、`InputSequenceResultTest.kt`、`SafeInvokeShizukuTest.kt`。
@@ -73,20 +78,20 @@
 
 ## 本轮开发停点
 
-- 最后完成项：阶段 4 第一批审查修复。规则汇总晚订阅不再丢首值，非焦点 Task 不再确认，TaskStack 两个回调不再旁路统一选择器。
+- 最后完成项：阶段 4 最终审查收口。根错配有界补查、确认重试顺序、Activity 权威来源和单调时钟四项均已修复，App 72/72、Selector 18/18、Release、Vital Lint 和真机进程冒烟通过。
 - 首次标题锚点方案被真机探针否定：快照中的 WebView 文本不可供活动选择器查询；文档和测试现以真实 50 节点拓扑为准，不再保留该假设。
 - 下次继续时不需要重复阶段 2 的手势取消、动作计数恢复和订阅哈希验收；只有 APK、签名、规则格式或相关执行链再次变化时才重跑对应基线。
-- 恢复编码入口：阶段 4 第一批采样模型已完成；下一步从输入法、SystemUI、权限控制器和画中画覆盖策略开始，再实现 50～300ms 冲突确认并接入规则上下文。
-- 工作区尚未提交；脏工作区 APK 版本为 `1.12.1-ee8c484-dirty`。继续开发前保留本轮 `RuleSummaryRefresh`、`ForegroundSnapshot`、`TaskStackListener`、对应测试和文档改动。
+- 恢复入口：阶段 4 已关闭，直接进入阶段 5 的窗口 generation、root 有限恢复和节点新鲜度改造。
+- 工作区尚未提交；脏工作区 APK 版本为 `1.12.1-3d7e18e-dirty`。继续开发前保留本轮 `ForegroundConfirmationState`、覆盖层分类、`A11yRuleEngine` 接入、对应测试和文档改动。
 
 ## 下一步
 
-进入阶段 4，按以下顺序实施：
+进入阶段 5，按以下顺序实施：
 
-1. 为输入法、SystemUI、权限控制器、画中画和普通覆盖层定义显式分类与测试矩阵。
-2. 对 Task/窗口短暂冲突增加 50～300ms 的有限确认，不做周期轮询。
-3. 将确认后的 `ForegroundSnapshot` 接入 `updateTopActivity` 和查询动作门控，未确认时暂缓执行。
-4. 把 userId、displayId、taskId、windowId 和置信度写入结构化诊断。
-5. 真机复测米游社、哔哩哔哩及固定窗口场景，并同步差异文档。
+1. 为窗口/root 暂时为空建立 50、100、200、400、800ms 的有界恢复状态机，只在切换窗口内启动。
+2. 引入窗口 generation，并在窗口状态、内容、旋转和显示屏变化时失效旧上下文。
+3. 使用节点前执行 `refresh()`；失败后重新取得 root 并核对 packageName、windowId、displayId 和 generation。
+4. 禁止旧 generation 的选择结果进入动作提交，补齐并发与过期节点测试。
+5. 在米游社和哔哩哔哩慢页面上进行真机回归，确认有限恢复提高命中率且不形成长期轮询。
 
 详细实施顺序见 [`root-runtime-refactor-plan.md`](root-runtime-refactor-plan.md)，代码级迁移方法见 [`upstream-code-delta-guide.md`](upstream-code-delta-guide.md)，真机证据见 [`testing/root-runtime-baseline.md`](testing/root-runtime-baseline.md)。

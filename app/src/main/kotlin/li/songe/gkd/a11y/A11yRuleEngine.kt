@@ -11,6 +11,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.atomicfu.atomic
 import kotlinx.atomicfu.getAndUpdate
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -32,6 +33,12 @@ import li.songe.gkd.runtime.diagnostics.DecisionOutcome
 import li.songe.gkd.runtime.diagnostics.DecisionReason
 import li.songe.gkd.runtime.diagnostics.DecisionStage
 import li.songe.gkd.runtime.diagnostics.decisionTraceBuffer
+import li.songe.gkd.runtime.foreground.ForegroundConfirmationResult
+import li.songe.gkd.runtime.foreground.ForegroundConfirmationState
+import li.songe.gkd.runtime.foreground.ForegroundSnapshot
+import li.songe.gkd.runtime.foreground.ForegroundSurface
+import li.songe.gkd.runtime.foreground.RootMismatchContext
+import li.songe.gkd.runtime.foreground.RootMismatchRetryState
 import li.songe.gkd.service.A11yService
 import li.songe.gkd.service.EventService
 import li.songe.gkd.service.topAppIdFlow
@@ -237,23 +244,9 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         )
         val evAppId = latestEvent.appId
         val evActivityId = latestEvent.name
-        val oldAppId = topActivityFlow.value.appId
-        val rightAppId = if (oldAppId == evAppId) {
-            evAppId
-        } else {
-            getTimeoutAppId() ?: run {
-                traceDecision(
-                    correlationId = decisionId,
-                    stage = DecisionStage.Foreground,
-                    outcome = DecisionOutcome.Skipped,
-                    reason = DecisionReason.ForegroundUnconfirmed,
-                    appId = evAppId,
-                    activityId = evActivityId,
-                )
-                return
-            }
-        }
-        if (rightAppId == evAppId) {
+        val foreground = getConfirmedForeground(decisionId) ?: return
+        val rightAppId = foreground.appId ?: return
+        if (foreground.canUseEventActivityFallback(evAppId)) {
             if (latestEvent.type == STATE_CHANGED) {
                 synchronized(topActivityFlow) {
                     // tv.danmaku.bili, com.miui.home, com.miui.home.launcher.Launcher
@@ -263,25 +256,6 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 }
             }
         }
-        if (rightAppId != topActivityFlow.value.appId) {
-            synchronized(topActivityFlow) {
-                // 从 锁屏，下拉通知栏 返回等情况, 应用不会发送事件, 但是系统组件会发送事件
-                val topCpn = shizukuContextFlow.value.topCpn()
-                if (topCpn?.packageName == rightAppId) {
-                    updateTopActivity(topCpn.packageName, topCpn.className)
-                } else {
-                    updateTopActivity(rightAppId, null)
-                }
-            }
-        }
-        traceDecision(
-            correlationId = decisionId,
-            stage = DecisionStage.Foreground,
-            outcome = DecisionOutcome.Observed,
-            reason = DecisionReason.ForegroundConfirmed,
-            appId = rightAppId,
-            activityId = topActivityFlow.value.activityId,
-        )
         val activityRule = activityRuleFlow.value
         if (evAppId != rightAppId) {
             traceDecision(
@@ -332,17 +306,121 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         startQueryJob(byEvent = latestEvent, decisionId = decisionId)
     }
 
-    private var lastGetAppIdTime = 0L
-    private var lastAppId: String? = null
-    private suspend fun getTimeoutAppId(): String? {
-        if (lastAppId != null && System.currentTimeMillis() - lastGetAppIdTime <= 100) return lastAppId
-        // 某些应用通过无障碍获取 safeActiveWindow 耗时长，导致多个事件连续堆积堵塞，无法检测到 appId 切换导致状态异常
-        // https://github.com/gkd-kit/gkd/issues/622
-        lastAppId = withTimeoutOrNull(100) {
-            runInterruptible(Dispatchers.IO) { safeActiveWindowAppId }
-        } ?: shizukuContextFlow.value.topCpn()?.packageName
-        lastGetAppIdTime = System.currentTimeMillis()
-        return lastAppId
+    private val foregroundConfirmationState = ForegroundConfirmationState(150L)
+    private var foregroundRetryJob: Job? = null
+    private val rootMismatchRetryState = RootMismatchRetryState()
+    private var rootMismatchRetryJob: Job? = null
+
+    private fun scheduleForegroundRetry(delayMillis: Long) {
+        synchronized(foregroundConfirmationState) {
+            if (foregroundRetryJob?.isActive == true) return
+            foregroundRetryJob = scope.launch(actionDispatcher) {
+                delay(delayMillis)
+                synchronized(foregroundConfirmationState) { foregroundRetryJob = null }
+                // Re-sample before startQueryJob checks the old Activity's rule set.
+                // This lets a static transition from a no-rule app enter a rule app.
+                getConfirmedForeground(null) ?: return@launch
+                startQueryJob()
+            }
+        }
+    }
+
+    private fun scheduleRootMismatchRetry(delayMillis: Long) {
+        synchronized(rootMismatchRetryState) {
+            if (rootMismatchRetryJob?.isActive == true) return
+            rootMismatchRetryJob = scope.launch(actionDispatcher) {
+                delay(delayMillis)
+                synchronized(rootMismatchRetryState) { rootMismatchRetryJob = null }
+                startQueryJob()
+            }
+        }
+    }
+
+    private fun applyForegroundSnapshot(snapshot: ForegroundSnapshot) {
+        val task = snapshot.task ?: return
+        val appId = task.appId ?: return
+        val activityId = task.activityId ?: return
+        synchronized(topActivityFlow) {
+            if (!topActivityFlow.value.sameAs(appId, activityId)) {
+                updateTopActivity(
+                    appId = appId,
+                    activityId = activityId,
+                    scene = ActivityScene.TaskStack,
+                )
+            }
+        }
+    }
+
+    private suspend fun getConfirmedForeground(decisionId: Long?): ForegroundSnapshot? {
+        val snapshot = withTimeoutOrNull(300L) {
+            runInterruptible(Dispatchers.IO) { service.captureForegroundSnapshot() }
+        }
+        if (snapshot == null) {
+            traceDecision(
+                decisionId,
+                DecisionStage.Foreground,
+                DecisionOutcome.Skipped,
+                DecisionReason.ForegroundUnconfirmed,
+                detail = "snapshot timeout",
+            )
+            return null
+        }
+        val detail = buildString {
+            append("confidence=").append(snapshot.confidence)
+            append(" surface=").append(snapshot.surface)
+            append(" taskId=").append(snapshot.task?.taskId)
+            append(" windowId=").append(snapshot.window?.windowId)
+            append(" userId=").append(snapshot.userId)
+            append(" displayId=").append(snapshot.displayId)
+            append(" taskApp=").append(snapshot.task?.appId)
+            append(" windowApp=").append(snapshot.window?.rootAppId)
+        }
+        return when (val result = foregroundConfirmationState.observe(snapshot)) {
+            is ForegroundConfirmationResult.Accepted -> {
+                applyForegroundSnapshot(result.snapshot)
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Foreground,
+                    DecisionOutcome.Observed,
+                    DecisionReason.ForegroundConfirmed,
+                    appId = result.snapshot.appId,
+                    activityId = result.snapshot.activityId,
+                    detail = detail,
+                )
+                result.snapshot
+            }
+
+            is ForegroundConfirmationResult.Pending -> {
+                scheduleForegroundRetry(result.retryAfterMillis)
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Foreground,
+                    DecisionOutcome.Skipped,
+                    DecisionReason.ForegroundConfirmationPending,
+                    appId = snapshot.appId,
+                    activityId = snapshot.activityId,
+                    detail = "$detail retryAfter=${result.retryAfterMillis}",
+                )
+                null
+            }
+
+            is ForegroundConfirmationResult.Rejected -> {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Foreground,
+                    DecisionOutcome.Skipped,
+                    if (snapshot.surface == ForegroundSurface.Application) {
+                        DecisionReason.ForegroundUnconfirmed
+                    } else {
+                        DecisionReason.ForegroundSurfaceBlocked
+                    },
+                    appId = snapshot.appId,
+                    activityId = snapshot.activityId,
+                    detail = detail,
+                )
+                null
+            }
+        }
     }
 
     // 某些场景耗时 5000 ms
@@ -456,28 +534,13 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
     }
 
-    private fun fixAppId(rightAppId: String) {
-        if (topActivityFlow.value.appId == rightAppId) return
-        synchronized(topActivityFlow) {
-            val topCpn = shizukuContextFlow.value.topCpn()
-            if (topCpn?.packageName == rightAppId) {
-                updateTopActivity(topCpn.packageName, topCpn.className)
-            } else {
-                updateTopActivity(rightAppId, null)
-            }
-        }
-        scope.launch(actionDispatcher) {
-            delay(300)
-            startQueryJob()
-        }
-    }
-
     private suspend fun queryAction(
         decisionId: Long?,
         byEvent: A11yEvent? = null,
         byForced: Boolean = false,
         delayRule: ResolvedRule? = null,
     ) {
+        val initialForeground = getConfirmedForeground(decisionId) ?: return
         val tempStateEvent = latestStateEvent
         val newEvents = if (delayRule != null) {// 延迟规则不消耗事件
             null
@@ -587,9 +650,20 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     rule,
                     "root=$rightAppId matchApp=$matchApp",
                 )
-                scope.launch(eventDispatcher) { fixAppId(rightAppId) }
+                // The root may have changed after the confirmed snapshot. Never let a raw node
+                // package bypass the fused foreground resolver; perform one bounded re-sample.
+                val mismatchContext = RootMismatchContext(
+                    taskId = initialForeground.task?.taskId,
+                    windowId = initialForeground.window?.windowId,
+                    foregroundAppId = initialForeground.appId,
+                    rootAppId = rightAppId,
+                )
+                if (rootMismatchRetryState.request(mismatchContext)) {
+                    scheduleRootMismatchRetry(150L)
+                }
                 return
             }
+            rootMismatchRetryState.clear()
             if (!matchApp) {
                 traceDecision(decisionId, DecisionStage.Foreground, DecisionOutcome.Skipped, DecisionReason.PackageActivityMismatch, rule, "root=$rightAppId")
                 continue
@@ -622,6 +696,22 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             if (checkOutDate(activityRule, tempStateEvent)) {
                 traceDecision(decisionId, DecisionStage.Foreground, DecisionOutcome.Skipped, DecisionReason.StaleContext, rule)
                 break
+            }
+            val actionForeground = getConfirmedForeground(decisionId) ?: return
+            if (
+                actionForeground.task?.taskId != initialForeground.task?.taskId ||
+                actionForeground.window?.windowId != initialForeground.window?.windowId ||
+                actionForeground.appId != initialForeground.appId
+            ) {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Foreground,
+                    DecisionOutcome.Skipped,
+                    DecisionReason.StaleContext,
+                    rule,
+                    "foreground changed before action",
+                )
+                return
             }
             traceDecision(decisionId, DecisionStage.Action, DecisionOutcome.Submitted, DecisionReason.ActionSubmitted, rule)
             val actionResult = rule.performAction(target)

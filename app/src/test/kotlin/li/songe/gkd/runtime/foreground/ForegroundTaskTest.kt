@@ -19,6 +19,7 @@ class ForegroundTaskTest {
         isFocused = focused,
         isVisible = visible,
         isRunning = running,
+        isPictureInPicture = false,
         appId = "app.$taskId",
         activityId = "app.$taskId.MainActivity",
     )

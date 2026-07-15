@@ -181,6 +181,7 @@ class ShizukuContext(
                     isFocused = true,
                     isVisible = true,
                     isRunning = true,
+                    isPictureInPicture = false,
                     appId = task.topActivity?.packageName,
                     activityId = task.topActivity?.className,
                 )
@@ -199,6 +200,7 @@ class ShizukuContext(
                 isFocused = if (AndroidTarget.S) hidden.isFocused else index == 0,
                 isVisible = if (AndroidTarget.S) hidden.isVisible else index == 0,
                 isRunning = hidden.isRunning,
+                isPictureInPicture = hidden.configuration.casted.windowConfiguration.windowingMode == 2,
                 appId = task.topActivity?.packageName,
                 activityId = task.topActivity?.className,
             )

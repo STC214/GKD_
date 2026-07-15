@@ -17,4 +17,8 @@ public class WindowConfiguration {
     public Rect getAppBounds() {
         throw new RuntimeException();
     }
+
+    public int getWindowingMode() {
+        throw new RuntimeException();
+    }
 }

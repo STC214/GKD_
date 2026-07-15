@@ -28,6 +28,8 @@ enum class DecisionReason(val label: String) {
     AutoMatchDisabled("自动匹配已关闭"),
     ForegroundConfirmed("前台应用已确认"),
     ForegroundUnconfirmed("无法确认前台应用"),
+    ForegroundConfirmationPending("前台冲突等待短时确认"),
+    ForegroundSurfaceBlocked("当前焦点窗口类型禁止执行"),
     WindowRootAvailable("活动窗口根节点可用"),
     WindowRootUnavailable("活动窗口根节点为空"),
     PackageActivityMismatch("包名或 Activity 不匹配"),

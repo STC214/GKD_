@@ -3,6 +3,7 @@ package li.songe.gkd.a11y
 import android.view.Display
 import li.songe.gkd.runtime.foreground.ForegroundSnapshot
 import li.songe.gkd.runtime.foreground.ForegroundWindow
+import li.songe.gkd.runtime.foreground.ForegroundWindowKind
 import li.songe.gkd.runtime.foreground.resolveForegroundSnapshot
 import li.songe.gkd.shizuku.shizukuContextFlow
 import li.songe.gkd.util.AndroidTarget
@@ -23,11 +24,31 @@ fun A11yCommonImpl.captureForegroundSnapshot(
             windowId = window.id,
             displayId = displayId,
             type = window.type,
+            kind = when (window.type) {
+                android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION -> ForegroundWindowKind.Application
+                android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD -> ForegroundWindowKind.InputMethod
+                android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM -> ForegroundWindowKind.System
+                android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> ForegroundWindowKind.AccessibilityOverlay
+                else -> ForegroundWindowKind.Other
+            },
             layer = window.layer,
             isFocused = window.isFocused,
             isActive = window.isActive,
             rootAppId = runCatching { window.root?.packageName?.toString() }.getOrNull(),
+            isPictureInPicture = if (
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+            ) {
+                window.isInPictureInPictureMode
+            } else {
+                false
+            },
         )
     }
-    return resolveForegroundSnapshot(task, windows, targetDisplayId, timestamp)
+    return resolveForegroundSnapshot(
+        task = task,
+        windows = windows,
+        targetDisplayId = targetDisplayId,
+        timestamp = timestamp,
+        imeAppId = imeAppId,
+    )
 }

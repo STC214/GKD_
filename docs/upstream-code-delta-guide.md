@@ -40,9 +40,9 @@
 | 官方 HEAD 标题 | `fix: UserInfo name is null` |
 | 当前 fork 仓库 | `https://github.com/STC214/GKD_.git` |
 | 当前 fork 分支 | `main` |
-| 当前 fork HEAD | `ee8c484cc7f765ffa4d641711edcb72b205c9396` |
+| 当前 fork HEAD | `3d7e18e339df547cabc06e618cb501a6ac87f820` |
 | 共同祖先 | `0b75375c0f40df62e93866e0e157d4e1ebc45c67` |
-| 分叉关系 | 相对上述官方基线，fork 领先 12 个提交；官方实时领先数本轮未刷新 |
+| 分叉关系 | 相对上述官方基线，fork 领先 13 个提交；官方实时领先数本轮未刷新 |
 | 当前应用版本 | `1.12.1` |
 | 当前 Git remote | 只有 `origin`，尚未持久配置 `upstream` |
 
@@ -84,15 +84,17 @@ git rev-list --left-right --count FETCH_HEAD...HEAD
 - Root UserService UID/命令真实性诊断、有限重连和回调竞态保护。
 - 2048 条结构化规则决策诊断、导出与诊断分析脚本。
 - Root/无障碍动作真实结果、手势完成/取消回调和失败不计次数语义。
+- 查询 pending/handoff 状态机和规则汇总晚加载补查。
+- focused/visible/running Task 与 focused Accessibility Window 的统一快照、严格确认和 TaskStack 统一重采样。
 
 当前已提交版本尚未包含：
 
 - APK 内置 `RootService`。
-- `ForegroundResolver`、`WindowProvider`、`ActionExecutor` 等新接口。
-- focused Task 与 focused Accessibility Window 融合。
-- 查询 pending/dirty 状态机。
-- 动作后的界面结果验证。
+- `WindowProvider`、`ActionExecutor` 等后续抽象接口。
+- 窗口 generation、节点新鲜度和动作后界面结果验证。
 - user 999/多显示屏完整运行时上下文。
+
+当前 `WORKTREE` 在已提交快照之上增加覆盖层分类、150ms 有界确认、规则查询/动作前门控和结构化前台上下文字段；详见 9.4。
 
 ### 4.3 规划中的 Root 加强版
 
@@ -114,7 +116,7 @@ git rev-list --left-right --count FETCH_HEAD...HEAD
 
 ## 5. 当前 fork 提交清单
 
-共同祖先之后共有 11 个 fork 提交：
+共同祖先之后共有 13 个 fork 提交：
 
 | 顺序 | 提交 | 主要内容 | 未来处置 |
 | ---: | --- | --- | --- |
@@ -130,6 +132,7 @@ git rev-list --left-right --count FETCH_HEAD...HEAD
 | 10 | `d33249d1` | Root 回调竞态、外部服务契约与诊断收口 | 保留连接代际和服务启动边界，避免恢复迟到回调 |
 | 11 | `f2e60bd0` | 动作结果可信化、诊断导出与当前进度入口 | 保留真实完成/取消结果和失败不触发规则语义 |
 | 12 | `ee8c484c` | 米游社兼容、规则汇总补查、查询唤醒状态机和阶段 4 第一批前台模型 | 按 9.2～9.4 的不变量迁移；本轮审查修复仍在工作区 |
+| 13 | `3d7e18e3` | 阶段 4 第一批审查修复及文档同步 | 保留规则汇总首值、严格快照确认和 TaskStack 统一重采样；第二批融合接入仍在工作区 |
 
 整合上游时可以使用：
 
@@ -779,13 +782,15 @@ app/src/test/kotlin/li/songe/gkd/data/RuleSelectorCompatTest.kt
 
 ### 9.4 阶段 4：焦点融合
 
-状态：`CURRENT`（提交 `ee8c484c`）+ `WORKTREE` 审查修复；第一批任务/窗口采样模型已于 2026-07-15 完成，尚未接管规则上下文。
+状态：`CURRENT`（提交 `3d7e18e3`）+ `WORKTREE` 第二批融合接入；任务/窗口采样、覆盖层分类、150ms 有界确认、规则上下文门控和 Android 16 固定场景验收已于 2026-07-15 完成。
 
 已新增：
 
 ```text
 runtime/foreground/ForegroundTask.kt
 runtime/foreground/ForegroundSnapshot.kt
+runtime/foreground/ForegroundConfirmationState.kt
+runtime/foreground/RootMismatchRetryState.kt
 a11y/ForegroundSnapshotProvider.kt
 ```
 
@@ -795,17 +800,21 @@ a11y/ForegroundSnapshotProvider.kt
 - `ShizukuApi.kt`：由 `getTasks(1).firstOrNull()` 改为查询 16 条候选，优先选择目标显示屏上 focused、visible、running 的任务；Android 9 保留旧顺序回退，Android 10/11 因系统尚无 focused/visible 字段而显式使用第一条任务作为兼容焦点，Android 12～15 不读取 Android 16 才加入的 effectiveUid。
 - `TaskStackListener.kt`：taskId 回调使用选择后的任务，不再再次假设第一条正确。
 
-`ForegroundSnapshotProvider` 从 focused Accessibility Window 采集窗口 ID、类型、层级、displayId、active 状态和 root 包名；同屏没有 focused 窗口时才回退 active 窗口。`ForegroundSnapshot` 只有在 Task 同时 focused、visible、running 且与 focused root 包一致时才为 `Confirmed`；包冲突时为 `Conflict` 且 `canExecute=false`，非焦点回退任务、单侧证据或 active 窗口均为 `Probable`。
+`ForegroundSnapshotProvider` 从 focused Accessibility Window 采集窗口 ID、类型、层级、displayId、active 状态和 root 包名；同屏没有 focused 窗口时才回退 active 窗口。`ForegroundSnapshot` 只有在 Task 同时 focused、visible、running 且与 focused root 包一致时才为 `Confirmed`；包冲突时为 `Conflict`，非焦点回退任务、单侧证据或 active 窗口均为 `Probable`。执行条件进一步收紧为 `Confirmed + ForegroundSurface.Application`。
 
 `TaskStackListener` 的 taskId 和 taskInfo 两个系统回调都只作为“任务状态变化”信号，随后调用同一 `getForegroundTask()` 重新采样；禁止再次直接信任回调顺序或 `taskInfo.topActivity`，否则会绕过多任务选择器。
 
-前台模型共 16 项测试覆盖任务优先级、跨显示屏过滤、窗口焦点/层级、快照置信度和非焦点/不可见/停止任务不得确认；规则汇总另有 1 项晚订阅测试。全量 App 56/56、Selector 18/18、Release 与 Vital Lint 通过；Android 16 覆盖安装并在 GKD/米游社之间触发 TaskStack，未出现隐藏字段错误，Root UserService 仍为 UID 0。
+`ForegroundWindowKind` 与 `ForegroundSurface` 显式区分 Application、InputMethod、SystemUI、PermissionController、PictureInPicture、AccessibilityOverlay、SystemOverlay 和 Unknown。权限控制器同时识别平台 permissioncontroller/packageinstaller 后缀和小米 `com.lbe.security.miui`；画中画来自 `WindowConfiguration.windowingMode == 2`，并按 Android 版本安全回退。
 
-下一批预计修改：
+`ForegroundConfirmationState` 使用 150ms 确认窗：普通应用确认快照立即接受；首次冲突只安排一个合并后的延迟复查；同一冲突在期限内保持 Pending，到期后拒绝并清空状态，不形成周期轮询。上下文键包含 task/window ID、双方包名、置信度和 surface；期限使用 `System.nanoTime()` 派生的单调毫秒值，快照的墙上时间只保留作诊断数据。
 
-- 建立输入法、SystemUI、权限控制器、画中画和普通覆盖层分类。
-- 对冲突快照做 50～300ms 有限确认，然后才接入 `A11yState.kt` 和规则动作门控。
-- 结构化诊断附带 userId/displayId/taskId/windowId/置信度。
+`A11yRuleEngine` 不再通过旧 `fixAppId` 或超时 Task/root 回退绕过融合器。事件消费和查询开始前必须取得接受的快照；冲突延迟回调必须先调用 `getConfirmedForeground()` 更新 Activity/规则上下文，再进入 `startQueryJob()` 的空规则检查，避免“无规则旧 App → 有规则静态页”被永久漏掉。动作提交前再采样一次，并核对 taskId、windowId、appId，变化时以 `StaleContext` 终止。TaskStack Activity 非空时禁止同包 `STATE_CHANGED` 事件覆盖它，事件 Activity 仅是缺失值兜底。根节点包与融合前台不一致时，`RootMismatchRetryState` 按 taskId、windowId、前台包和 root 包组成上下文，每个上下文只允许一次 150ms 补查；成功匹配后清空，禁止把持续错配变成周期轮询。诊断详情写入 confidence、surface、taskId、windowId、userId、displayId、taskApp 和 windowApp；覆盖层拒绝使用 `ForegroundSurfaceBlocked`，确认等待使用 `ForegroundConfirmationPending`。
+
+前台第二批及审查收口测试覆盖输入法、SystemUI/权限控制器、画中画、无障碍/系统覆盖层、立即接受、150ms Pending/Rejected、冲突变化重启确认窗、确认后清理状态、墙上时间回拨、Task Activity 权威性及根错配单次补查。Android 16 上可见输入法与 PiP 窗口都可能是 `focused=false/active=false`，因此 `selectForegroundWindow` 会在普通焦点窗口前选择交互列表中的 InputMethod/PiP；权限弹窗则可能由顶部 permissioncontroller Task 配合仍指向底层 App 的 focused Accessibility Window，因此 surface 同时检查 taskAppId/windowAppId。全量 App 72/72、Selector 18/18 已通过；修复版 Release、Vital Lint 和真机结果见基线文档。
+
+真机证据位于 `window-scenarios/20260715_111705_phase4_ime_visible/`、`20260715_112245_phase4_permission_dialog/` 和 `20260715_112617_phase4_pip_visible/`。最终 APK 又依次重放三场景，随后卸载两个临时探针并恢复米游社前台；主进程和 UID 0 Root UserService 稳定，无隐藏 API 错误或 GKD `AndroidRuntime`。
+
+下一批预计修改：进入阶段 5，为窗口/root 暂时不可用增加有限退避，并引入窗口 generation、节点新鲜度和动作前 refresh。
 
 合并时必须区分：
 
@@ -1324,11 +1333,11 @@ common/gkd.apk
 
 截至 2026-07-15：
 
-- 当前 HEAD 为 `ee8c484c`；阶段 0.5～3、米游社兼容和阶段 4 第一批已提交。本轮规则汇总、快照确认和 TaskStack 旁路修复及文档仍在工作区，尚未提交。
+- 当前 HEAD 为 `3d7e18e3`；阶段 0.5～3、米游社兼容和阶段 4 第一批审查修复已提交。本轮覆盖层分类、150ms 确认、规则上下文接入、测试和文档仍在工作区，尚未提交。
 - 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
 - 阶段 1 已由米游社有效 B01 现场完成闭环：连续查询稳定终止于 `SelectorMiss`，窄范围兼容层随后完成真实未签到点击、弹窗关闭和累计签到天数变化验收。
-- 当前 Release 为 `1.12.1-ee8c484-dirty`，SHA-256 `E00AD97B656F37FE7C21D23472292674EA38A3DA25A7724BE9C4623A658897F8`，3,320,195 字节；App 56/56、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装：主进程 PID `15270`，Root UserService PID `15379`、UID 0，StatusService 为前台；GKD/米游社 TaskStack 往返后进程稳定，无隐藏字段错误或新增 GKD `AndroidRuntime`。
+- 当前 Release 为 `1.12.1-3d7e18e-dirty`，SHA-256 `F0814E2C6A33DEA4DE2AE79A4CDDEE2DC4F2D963F6E48F92EC05354D6B189EC1`，3,320,187 字节；App 72/72、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装并显式重启远端服务：主进程 PID `20425`，Root UserService PID `2793`、UID 0，StatusService 为前台，清空日志后的启动过程无新增 GKD `AndroidRuntime`。
 - 真机已恢复 Root/自动化原配置，Root UserService UID 0，临时 HTTP 服务和快照已清除。重启后的 KernelSU `ksu` SELinux 域不能直接读取 App 私有目录，因此本轮未重复宣称配置/订阅文件哈希验收，改用 App 首页实际加载结果作为非清数据证据。
-- 阶段 3 已完成；阶段 4 第一批多任务选择、焦点窗口/root 包采集和统一置信度模型已完成，下一步实现覆盖层策略、冲突延迟确认和规则上下文接入。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
+- 阶段 3、4 已完成；下一步进入阶段 5 的窗口 generation、有限恢复和节点新鲜度改造。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
 
 最新整体状态以 [`current-progress.md`](current-progress.md) 为入口；本文仍负责记录每项代码级差异和未来上游迁移方法。

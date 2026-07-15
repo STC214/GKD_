@@ -8,6 +8,7 @@ data class ForegroundTask(
     val isFocused: Boolean,
     val isVisible: Boolean,
     val isRunning: Boolean,
+    val isPictureInPicture: Boolean,
     val appId: String?,
     val activityId: String?,
 )

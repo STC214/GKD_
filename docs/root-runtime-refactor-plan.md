@@ -249,6 +249,8 @@ RootActionExecutor
 
 目标：同时识别任务、真实焦点窗口、节点包、显示屏和用户。
 
+状态：`已完成（2026-07-15）`。代码、自动测试及 Android 16 普通应用、SystemUI、输入法、权限弹窗和真实画中画固定场景均已验收。
+
 任务：
 
 - [x] 扩展隐藏 `TaskInfo` 映射，读取 `userId`、`taskId`、`effectiveUid`、`displayId`、`isFocused`、`isVisible` 和 `isRunning`。
@@ -258,9 +260,9 @@ RootActionExecutor
 - [x] 从焦点窗口 root 获取真实节点包名。
 - [x] 建立统一的 `ForegroundSnapshot`，至少包含任务、Activity、窗口包、用户、显示屏、时间戳和置信度。
 - [x] 收紧 `Confirmed`：Task 必须同时 focused、visible、running，且两个 TaskStack 回调都只触发统一重新采样。
-- [ ] 为输入法、SystemUI、权限控制器、画中画和覆盖层制定明确策略。
-- [ ] Task 与窗口短暂冲突时延迟 50～300ms 确认，不立即切换规则上下文。
-- [ ] 未确认时宁可暂缓动作，不在错误窗口执行。
+- [x] 为输入法、SystemUI、权限控制器、画中画和覆盖层制定明确策略。
+- [x] Task 与窗口短暂冲突时执行一次 150ms 有界确认，不立即切换规则上下文、不周期轮询。
+- [x] 未确认时宁可暂缓动作，不在错误窗口执行；动作提交前再次核对 taskId、windowId 和 appId。
 
 判定原则：
 
@@ -277,6 +279,8 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 - 权限弹窗/SystemUI 覆盖时不会拿底层 App 的 Activity 配合上层窗口节点误执行。
 - 小窗、分屏和画中画场景可明确指出哪个任务和窗口拥有焦点。
 - 每次规则动作日志包含 userId、displayId、taskId、windowId 和置信度。
+
+当前实现结果：`ForegroundSurface` 将普通应用与输入法、SystemUI、权限控制器、画中画、无障碍覆盖层及其他系统覆盖层分开；只有 `Confirmed + Application` 可执行。`ForegroundConfirmationState` 对冲突上下文最多等待 150ms，同一冲突到期后拒绝且不继续轮询，并以单调时钟抵抗系统时间回拨。`A11yRuleEngine` 的事件入口、规则查询入口和动作提交前均使用同一快照；延迟确认先重新采样前台再检查新 Activity 的规则集，根节点持续错配时每个 task/window/root 上下文最多补查一次。Activity 以 TaskStack 为权威来源，只有 Task Activity 缺失才接受同包状态事件兜底；动作前 taskId、windowId 或 appId 变化即记录 `StaleContext`。结构化诊断附带置信度、surface、userId、displayId、taskId 和 windowId。真机发现可见输入法与 PiP 窗口可能均为 `focused=false/active=false`，因此交互窗口列表中的 InputMethod/PiP 在普通焦点窗口之前选择；权限控制器同时检查 Task 与 Window 包。App 72/72、Selector 18/18 已通过；Release、Vital Lint 和修复版真机结果见基线文档，阶段 4 验收完成。
 
 ### 阶段 5：改进窗口获取、节点新鲜度和短时恢复
 
@@ -453,7 +457,7 @@ test(phase-9): ...
 | 1. 决策诊断 | 已完成 | 结构化枚举、关联 ID、2048 条环形缓冲、导出和 UI 已完成；米游社有效 B01 已稳定定位为 `WindowRootAvailable → SelectorMiss`，证明诊断可闭环真实漏执行。 |
 | 2. 动作结果误判修复 | 已完成 | Root 完成路径、无障碍取消路径、失败不计次数/冷却和订阅不变量均已验收。 |
 | 3. 查询唤醒重构 | 已完成 | `QueryWakeState` 单 runner、有界 pending、常量空间事件缓冲、规则晚加载补查、39 项 App 测试和真机事件风暴冒烟均通过。 |
-| 4. 前台与焦点窗口融合 | 进行中 | 第一批多任务选择、焦点窗口采样和统一快照模型已完成；晚订阅、误确认和回调旁路已修复，覆盖层策略、冲突确认和规则接入待完成。 |
+| 4. 前台与焦点窗口融合 | 已完成 | 多任务/窗口融合、覆盖层策略、单调时钟 150ms 确认、规则与动作门控、根错配单次补查及 Activity 来源收口均已完成。 |
 | 5. 窗口与节点恢复 | 未开始 | |
 | 6. 动作执行器增强 | 未开始 | |
 | 7. APK 内置 RootService | 未开始 | |

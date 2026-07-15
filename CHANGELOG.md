@@ -17,6 +17,15 @@
 - 修复规则查询期间到达的新事件被直接丢弃的问题；事件风暴现在合并为一个后续唤醒，查询事件缓冲保持常量空间。
 - 前台判断开始使用多条任务中的 focused/visible/running 状态，并新增焦点窗口、root 包名、用户和显示屏统一快照；冲突快照默认禁止执行。
 - 收紧前台快照确认条件：任务必须同时 focused、visible、running，两个 TaskStack 回调统一重新采样焦点任务。
+- 前台窗口新增 Application、InputMethod、SystemUI、PermissionController、PictureInPicture、AccessibilityOverlay 和 SystemOverlay 分类；非普通应用覆盖层默认禁止规则动作。
+- Task 与焦点窗口冲突改为一次 150ms 有界确认，不做周期轮询；确认后的统一快照现已接管规则查询和动作提交前校验。
+- 动作提交前再次核对 taskId、windowId 和 appId，窗口上下文变化时以 `StaleContext` 终止，不向旧窗口发送动作。
+- 修复 Android 16 上可见输入法和画中画窗口可能同时为 `focused=false/active=false` 而被漏判的问题；交互窗口列表中存在时仍优先阻断宿主规则。
+- 修复权限控制器已成为顶部 Task、但无障碍仍把底层 App 窗口标为 focused 时的漏判；现在同时核对 Task 与 Window 包名。
+- 修复静态页面前台冲突复查被旧 Activity 的空规则集提前拦截的问题；延迟任务现在先重新确认前台，再进入规则查询。
+- 根节点包与已确认前台不一致时，每个上下文最多补查一次，避免持续错配触发 150ms 无限重试。
+- TaskStack 提供 Activity 时不再被同包的旧 `STATE_CHANGED` 事件覆盖；只有 Task Activity 缺失时才使用事件兜底。
+- 150ms 前台确认改用单调时钟计时，系统时间校准或回拨不再延长确认窗口。
 - 米游社漏执行现在可通过结构化诊断明确区分选择器未命中、窗口不可用和动作失败。
 - 脏工作区构建的 APK 版本追加 `-dirty`，避免未提交代码与纯提交版本重名。
 - 优化快照结果提示文案

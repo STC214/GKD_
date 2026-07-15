@@ -10,6 +10,8 @@ import android.app.UiAutomation
 import android.app.UiAutomationHidden
 import android.content.pm.PackageInfo
 import android.content.pm.PackageInfoHidden
+import android.content.res.Configuration
+import android.content.res.ConfigurationHidden
 import android.view.KeyEvent
 import android.view.KeyEventHidden
 import android.view.MotionEvent
@@ -31,5 +33,7 @@ inline val KeyEvent.casted get() = this as KeyEventHidden
 inline val MotionEvent.casted get() = this as MotionEventHidden
 
 inline val PackageInfo.casted get() = this as PackageInfoHidden
+
+inline val Configuration.casted get() = this as ConfigurationHidden
 
 inline val ActivityManager.RunningTaskInfo.casted get() = this as TaskInfoHidden
