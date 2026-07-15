@@ -826,12 +826,29 @@ a11y/ForegroundSnapshotProvider.kt
 
 ### 9.5 阶段 5：窗口与节点 generation
 
-预计新增或修改：
+状态：`IN PROGRESS`（`3bca44d7` 之上的工作区）。代码任务已完成，等待可控 root 缺失及慢页面专项真机验收。
 
-- 窗口 generation/transition 标识。
-- 有限退避重试。
-- `A11yContext` 缓存失效策略。
-- 动作前节点和窗口二次验证。
+新增：
+
+```text
+runtime/foreground/WindowRootRecoveryState.kt
+runtime/foreground/WindowGenerationState.kt
+```
+
+修改：
+
+- `A11yRuleEngine.kt`：窗口状态变化、App 切换、亮屏和成功动作显式开启 3 秒恢复窗；root 为空时依次调度 50/100/200/400/800ms，次数耗尽后记录 `WindowRootRecoveryExhausted` 并停止。root 为空本身不能开始或续期。
+- `A11yRuleEngine.kt`：State/App/亮屏/动作推进结构 generation；Content 事件只失效对应事件分支并进入 pending 查询。查询开始捕获 generation/taskId/windowId/appId/displayId/rotation，动作前再以融合快照核对，禁止旧结构结果执行。
+- `A11yContext.kt`：`moveToGeneration()` 在查询线程切代，清空 rootCache、childCache、parentCache 和 indexCache，避免跨窗口复用遍历结果。
+- `A11yRuleEngine.kt`：动作前刷新目标节点。刷新或窗口归属校验失败时清缓存、重新取得 root、复跑同一规则；新 root/节点必须保持同包、同 windowId、同 displayId、同 generation 且再次刷新成功。
+- `DecisionReason.kt`：新增有限恢复 Pending/Exhausted 与节点刷新失败/重新定位原因，失败终点可由结构化诊断区分。
+- `ForegroundSnapshot.kt` / `A11yRuleEngine.kt`：新增严格的 `canRecoverMissingRoot`，要求 focused/visible/running Task 与 focused Application Window 同时成立，仅允许 rootAppId 暂空；该分支在普通前台确认之前消费有限恢复预算，不允许直接执行规则。
+- `A11yRuleEngine.kt`：State 事件推进结构 generation；Content 事件只进入原有分支缓存失效和有界 pending 查询，不再全局换代，避免 WebView/视频页事件风暴持续制造 `StaleContext`。
+- `WindowRootRecoveryState.kt`：attempt 预算属于整个显式切换窗口，上下文变化只更新诊断上下文，不再重置次数。
+- `NodeCachePolicy.kt` / `A11yExt.kt`：默认节点时效为文本 500ms、结构 1000ms，Legacy 策略保留 1000/2000ms；生成时间和过期判断改用 `SystemClock.elapsedRealtime()`。
+- `ForegroundSnapshotProvider.kt` / `WindowGenerationState.kt`：rotation 加入快照和令牌；display/rotation 变化在下一次 capture 时显式推进 generation，动作前同时核对。
+
+阶段 5 当前新增 16 项 JVM 回归，覆盖无切换不恢复、完整有限退避、期限不续期、共享总预算、缺 root 可恢复边界、State/Content generation 策略、rotation 失效和默认/Legacy 缓存策略。当前 App 88/88、Selector 18/18、Release 与 Vital Lint 通过；APK 已覆盖安装，Root UserService UID 0，动态页面 root 滑动冒烟无新增 GKD `AndroidRuntime`。
 
 合并时不能仅比较类名；必须核对上游是否已经改变节点过期、缓存或 `refresh()` 行为。
 
@@ -1333,11 +1350,11 @@ common/gkd.apk
 
 截至 2026-07-15：
 
-- 当前 HEAD 为 `3d7e18e3`；阶段 0.5～3、米游社兼容和阶段 4 第一批审查修复已提交。本轮覆盖层分类、150ms 确认、规则上下文接入、测试和文档仍在工作区，尚未提交。
+- 当前 HEAD 为 `3bca44d7`；阶段 0.5～4、米游社兼容和阶段 4 最终审查收口已提交。本轮阶段 5 第一批有限恢复、generation、节点刷新、测试和文档仍在工作区，尚未提交。
 - 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
 - 阶段 1 已由米游社有效 B01 现场完成闭环：连续查询稳定终止于 `SelectorMiss`，窄范围兼容层随后完成真实未签到点击、弹窗关闭和累计签到天数变化验收。
-- 当前 Release 为 `1.12.1-3d7e18e-dirty`，SHA-256 `F0814E2C6A33DEA4DE2AE79A4CDDEE2DC4F2D963F6E48F92EC05354D6B189EC1`，3,320,187 字节；App 72/72、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装并显式重启远端服务：主进程 PID `20425`，Root UserService PID `2793`、UID 0，StatusService 为前台，清空日志后的启动过程无新增 GKD `AndroidRuntime`。
+- 当前 Release 为 `1.12.1-3bca44d-dirty`，SHA-256 `1151E53FA7DCAD8F4B8212D2D04F0C81663F133EFCF52609C00DCE23C68C620D`，3,320,183 字节；App 88/88、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装：主进程 PID `24515`，Root UserService PID `18339`、UID 0，StatusService 为前台；root 动态页面滑动冒烟后无新增 GKD `AndroidRuntime`。
 - 真机已恢复 Root/自动化原配置，Root UserService UID 0，临时 HTTP 服务和快照已清除。重启后的 KernelSU `ksu` SELinux 域不能直接读取 App 私有目录，因此本轮未重复宣称配置/订阅文件哈希验收，改用 App 首页实际加载结果作为非清数据证据。
-- 阶段 3、4 已完成；下一步进入阶段 5 的窗口 generation、有限恢复和节点新鲜度改造。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
+- 阶段 3、4 已完成，阶段 5 第一批已完成；下一步处理动态缓存时效、旋转/显示屏显式 generation 信号和慢页面专项回归。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
 
 最新整体状态以 [`current-progress.md`](current-progress.md) 为入口；本文仍负责记录每项代码级差异和未来上游迁移方法。

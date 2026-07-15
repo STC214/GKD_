@@ -27,26 +27,34 @@ private fun List<Any>.getInt(i: Int = 0) = get(i) as Int
 
 private const val MAX_CACHE_SIZE = MAX_DESCENDANTS_SIZE
 
-private val AccessibilityNodeInfo?.notExpiredNode: AccessibilityNodeInfo?
-    get() {
+private fun AccessibilityNodeInfo?.notExpiredNode(policy: NodeCachePolicy): AccessibilityNodeInfo? {
         if (this != null) {
-            val expiryMillis = if (text == null) 2000L else 1000L
+            val expiryMillis = policy.expiryMillis(hasText = text != null)
             if (isExpired(expiryMillis)) {
                 return null
             }
         }
         return this
-    }
+}
 
 class A11yContext(
     private val a11yEngine: A11yRuleEngine,
     private val interruptable: Boolean = true,
+    private val nodeCachePolicy: NodeCachePolicy = NodeCachePolicy.Default,
 ) {
     private var childCache =
         LruCache<Pair<AccessibilityNodeInfo, Int>, AccessibilityNodeInfo>(MAX_CACHE_SIZE)
     private var indexCache = LruCache<AccessibilityNodeInfo, Int>(MAX_CACHE_SIZE)
     private var parentCache = LruCache<AccessibilityNodeInfo, AccessibilityNodeInfo>(MAX_CACHE_SIZE)
     val rootCache = atomic<AccessibilityNodeInfo?>(null)
+    private var cacheGeneration = -1L
+
+    fun moveToGeneration(generation: Long) {
+        if (cacheGeneration == generation) return
+        cacheGeneration = generation
+        rootCache.value = null
+        clearNodeCache()
+    }
 
     private fun clearChildCache(node: AccessibilityNodeInfo) {
         repeat(node.childCount.coerceAtMost(MAX_CHILD_SIZE)) { i ->
@@ -175,7 +183,7 @@ class A11yContext(
     }
 
     private fun getCacheRoot(node: AccessibilityNodeInfo? = null): AccessibilityNodeInfo? {
-        if (rootCache.value.notExpiredNode == null) {
+        if (rootCache.value.notExpiredNode(nodeCachePolicy) == null) {
             rootCache.value = getA11Root()
         }
         if (node == rootCache.value) return null
@@ -186,7 +194,7 @@ class A11yContext(
         if (getCacheRoot() == node) {
             return null
         }
-        parentCache[node].notExpiredNode?.let { return it }
+        parentCache[node].notExpiredNode(nodeCachePolicy)?.let { return it }
         return getA11Parent(node).apply {
             if (this != null) {
                 parentCache[node] = this
@@ -200,7 +208,7 @@ class A11yContext(
         if (index !in 0 until node.childCount) {
             return null
         }
-        return childCache[node to index].notExpiredNode ?: getA11Child(node, index)?.also { child ->
+        return childCache[node to index].notExpiredNode(nodeCachePolicy) ?: getA11Child(node, index)?.also { child ->
             indexCache[child] = index
             parentCache[child] = node
             childCache[node to index] = child

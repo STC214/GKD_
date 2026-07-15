@@ -39,6 +39,11 @@ import li.songe.gkd.runtime.foreground.ForegroundSnapshot
 import li.songe.gkd.runtime.foreground.ForegroundSurface
 import li.songe.gkd.runtime.foreground.RootMismatchContext
 import li.songe.gkd.runtime.foreground.RootMismatchRetryState
+import li.songe.gkd.runtime.foreground.WindowRootRecoveryContext
+import li.songe.gkd.runtime.foreground.WindowRootRecoveryResult
+import li.songe.gkd.runtime.foreground.WindowRootRecoveryState
+import li.songe.gkd.runtime.foreground.WindowGenerationState
+import li.songe.gkd.runtime.foreground.WindowContextToken
 import li.songe.gkd.service.A11yService
 import li.songe.gkd.service.EventService
 import li.songe.gkd.service.topAppIdFlow
@@ -70,6 +75,10 @@ internal fun <T> ArrayDeque<T>.removeMatchingPrefix(predicate: (T) -> Boolean): 
     return prefix
 }
 
+internal fun shouldAdvanceWindowGeneration(eventType: Int): Boolean {
+    return eventType == STATE_CHANGED
+}
+
 private val latestServiceMode = atomic(0)
 private val latestServiceTime = atomic(0L)
 
@@ -99,6 +108,8 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     }
 
     fun onScreenForcedActive() {
+        advanceWindowGeneration()
+        markWindowTransition()
         // 关闭屏幕 -> Activity::onStop -> 点亮屏幕 -> Activity::onStart -> Activity::onResume
         val a = topActivityFlow.value
         synchronized(topActivityFlow) {
@@ -214,7 +225,11 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             return
         }
         lastEventTime = event.eventTime
+        if (shouldAdvanceWindowGeneration(event.eventType)) {
+            advanceWindowGeneration()
+        }
         if (event.eventType == STATE_CHANGED) {
+            markWindowTransition()
             latestStateEvent = a11yEvent
         }
         synchronized(eventDeque) { eventDeque.addLast(a11yEvent) }
@@ -244,7 +259,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         )
         val evAppId = latestEvent.appId
         val evActivityId = latestEvent.name
-        val foreground = getConfirmedForeground(decisionId) ?: return
+        val foreground = getConfirmedForeground(
+            decisionId = decisionId,
+            allowMissingRootRecovery = true,
+        ) ?: return
         val rightAppId = foreground.appId ?: return
         if (foreground.canUseEventActivityFallback(evAppId)) {
             if (latestEvent.type == STATE_CHANGED) {
@@ -310,6 +328,13 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     private var foregroundRetryJob: Job? = null
     private val rootMismatchRetryState = RootMismatchRetryState()
     private var rootMismatchRetryJob: Job? = null
+    private val windowRootRecoveryState = WindowRootRecoveryState()
+    private var windowRootRecoveryJob: Job? = null
+    private val windowGenerationState = WindowGenerationState()
+
+    private fun advanceWindowGeneration() {
+        windowGenerationState.advance()
+    }
 
     private fun scheduleForegroundRetry(delayMillis: Long) {
         synchronized(foregroundConfirmationState) {
@@ -336,12 +361,47 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
     }
 
+    private fun markWindowTransition() {
+        synchronized(windowRootRecoveryState) {
+            windowRootRecoveryJob?.cancel()
+            windowRootRecoveryJob = null
+            windowRootRecoveryState.startTransition()
+        }
+    }
+
+    private fun scheduleWindowRootRecovery(delayMillis: Long) {
+        synchronized(windowRootRecoveryState) {
+            if (windowRootRecoveryJob?.isActive == true) return
+            windowRootRecoveryJob = scope.launch(actionDispatcher) {
+                delay(delayMillis)
+                synchronized(windowRootRecoveryState) { windowRootRecoveryJob = null }
+                // Continue the recovery state machine before the old Activity's
+                // rule set can make startQueryJob return early.
+                getConfirmedForeground(
+                    decisionId = null,
+                    allowMissingRootRecovery = true,
+                ) ?: return@launch
+                startQueryJob()
+            }
+        }
+    }
+
+    private fun completeWindowRootRecovery() {
+        synchronized(windowRootRecoveryState) {
+            windowRootRecoveryJob?.cancel()
+            windowRootRecoveryJob = null
+            windowRootRecoveryState.complete()
+        }
+    }
+
     private fun applyForegroundSnapshot(snapshot: ForegroundSnapshot) {
         val task = snapshot.task ?: return
         val appId = task.appId ?: return
         val activityId = task.activityId ?: return
         synchronized(topActivityFlow) {
             if (!topActivityFlow.value.sameAs(appId, activityId)) {
+                advanceWindowGeneration()
+                markWindowTransition()
                 updateTopActivity(
                     appId = appId,
                     activityId = activityId,
@@ -351,7 +411,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
     }
 
-    private suspend fun getConfirmedForeground(decisionId: Long?): ForegroundSnapshot? {
+    private suspend fun getConfirmedForeground(
+        decisionId: Long?,
+        allowMissingRootRecovery: Boolean = false,
+    ): ForegroundSnapshot? {
         val snapshot = withTimeoutOrNull(300L) {
             runInterruptible(Dispatchers.IO) { service.captureForegroundSnapshot() }
         }
@@ -374,6 +437,47 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             append(" displayId=").append(snapshot.displayId)
             append(" taskApp=").append(snapshot.task?.appId)
             append(" windowApp=").append(snapshot.window?.rootAppId)
+        }
+        if (allowMissingRootRecovery && snapshot.canRecoverMissingRoot) {
+            val recoveryContext = WindowRootRecoveryContext(
+                taskId = snapshot.task?.taskId,
+                windowId = snapshot.window?.windowId,
+                appId = snapshot.appId,
+            )
+            traceDecision(
+                decisionId,
+                DecisionStage.Window,
+                DecisionOutcome.Skipped,
+                DecisionReason.WindowRootUnavailable,
+                appId = snapshot.appId,
+                activityId = snapshot.activityId,
+                detail = "$detail focused application root is not mounted",
+            )
+            when (val recovery = windowRootRecoveryState.nextAttempt(recoveryContext)) {
+                WindowRootRecoveryResult.Inactive -> Unit
+                is WindowRootRecoveryResult.Scheduled -> {
+                    traceDecision(
+                        decisionId,
+                        DecisionStage.Window,
+                        DecisionOutcome.Skipped,
+                        DecisionReason.WindowRootRecoveryPending,
+                        appId = snapshot.appId,
+                        activityId = snapshot.activityId,
+                        detail = "attempt=${recovery.attempt}/${recovery.totalAttempts} delay=${recovery.delayMillis}",
+                    )
+                    scheduleWindowRootRecovery(recovery.delayMillis)
+                }
+                is WindowRootRecoveryResult.Exhausted -> traceDecision(
+                    decisionId,
+                    DecisionStage.Window,
+                    DecisionOutcome.Failed,
+                    DecisionReason.WindowRootRecoveryExhausted,
+                    appId = snapshot.appId,
+                    activityId = snapshot.activityId,
+                    detail = "attempts=${recovery.attempts}",
+                )
+            }
+            return null
         }
         return when (val result = foregroundConfirmationState.observe(snapshot)) {
             is ForegroundConfirmationResult.Accepted -> {
@@ -519,6 +623,30 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
     }
 
+    private fun refreshNode(node: AccessibilityNodeInfo): Boolean {
+        return try {
+            node.refresh().also { refreshed ->
+                if (refreshed) node.setGeneratedTime()
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun nodeMatchesWindow(node: AccessibilityNodeInfo, token: WindowContextToken): Boolean {
+        if (node.packageName?.toString() != token.appId) return false
+        if (token.windowId != null && node.windowId != token.windowId) return false
+        if (AndroidTarget.TIRAMISU) {
+            val nodeDisplayId = try {
+                node.window?.displayId
+            } catch (_: Throwable) {
+                null
+            }
+            if (nodeDisplayId != null && nodeDisplayId != token.displayId) return false
+        }
+        return true
+    }
+
     private fun checkFutureStartJob() {
         val t = System.currentTimeMillis()
         if (t - lastTriggerTime < 3000L || t - appChangeTime < 3000L) {
@@ -540,7 +668,12 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         byForced: Boolean = false,
         delayRule: ResolvedRule? = null,
     ) {
-        val initialForeground = getConfirmedForeground(decisionId) ?: return
+        val initialForeground = getConfirmedForeground(
+            decisionId = decisionId,
+            allowMissingRootRecovery = true,
+        ) ?: return
+        val windowContextToken = windowGenerationState.capture(initialForeground)
+        a11yContext.moveToGeneration(windowContextToken.generation)
         val tempStateEvent = latestStateEvent
         val newEvents = if (delayRule != null) {// 延迟规则不消耗事件
             null
@@ -632,8 +765,36 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             val nodeVal = lastNode ?: getTimeoutActiveWindow()
             if (nodeVal == null) {
                 traceDecision(decisionId, DecisionStage.Window, DecisionOutcome.Skipped, DecisionReason.WindowRootUnavailable, rule)
-                continue
+                val recoveryContext = WindowRootRecoveryContext(
+                    taskId = initialForeground.task?.taskId,
+                    windowId = initialForeground.window?.windowId,
+                    appId = initialForeground.appId,
+                )
+                when (val recovery = windowRootRecoveryState.nextAttempt(recoveryContext)) {
+                    WindowRootRecoveryResult.Inactive -> Unit
+                    is WindowRootRecoveryResult.Scheduled -> {
+                        traceDecision(
+                            decisionId,
+                            DecisionStage.Window,
+                            DecisionOutcome.Skipped,
+                            DecisionReason.WindowRootRecoveryPending,
+                            rule,
+                            "attempt=${recovery.attempt}/${recovery.totalAttempts} delay=${recovery.delayMillis}",
+                        )
+                        scheduleWindowRootRecovery(recovery.delayMillis)
+                    }
+                    is WindowRootRecoveryResult.Exhausted -> traceDecision(
+                        decisionId,
+                        DecisionStage.Window,
+                        DecisionOutcome.Failed,
+                        DecisionReason.WindowRootRecoveryExhausted,
+                        rule,
+                        "attempts=${recovery.attempts}",
+                    )
+                }
+                return
             }
+            completeWindowRootRecovery()
             traceDecision(decisionId, DecisionStage.Window, DecisionOutcome.Observed, DecisionReason.WindowRootAvailable, rule)
             val rightAppId = nodeVal.packageName?.toString()
             if (rightAppId == null) {
@@ -668,7 +829,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 traceDecision(decisionId, DecisionStage.Foreground, DecisionOutcome.Skipped, DecisionReason.PackageActivityMismatch, rule, "root=$rightAppId")
                 continue
             }
-            val target = try {
+            var target = try {
                 a11yContext.queryRule(rule, nodeVal)
             } catch (e: InterruptRuleMatchException) {
                 traceDecision(decisionId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.StaleContext, rule, "priority interrupt")
@@ -698,24 +859,84 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 break
             }
             val actionForeground = getConfirmedForeground(decisionId) ?: return
-            if (
-                actionForeground.task?.taskId != initialForeground.task?.taskId ||
-                actionForeground.window?.windowId != initialForeground.window?.windowId ||
-                actionForeground.appId != initialForeground.appId
-            ) {
+            if (!windowGenerationState.isCurrent(windowContextToken, actionForeground)) {
                 traceDecision(
                     decisionId,
                     DecisionStage.Foreground,
                     DecisionOutcome.Skipped,
                     DecisionReason.StaleContext,
                     rule,
-                    "foreground changed before action",
+                    "window generation or foreground changed before action",
+                )
+                return
+            }
+            if (!nodeMatchesWindow(target, windowContextToken) || !refreshNode(target)) {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Window,
+                    DecisionOutcome.Skipped,
+                    DecisionReason.NodeRefreshFailed,
+                    rule,
+                    "targetWindow=${target.windowId} expectedWindow=${windowContextToken.windowId}",
+                )
+                a11yContext.clearNodeCache()
+                val freshRoot = getTimeoutActiveWindow()
+                if (freshRoot == null || !nodeMatchesWindow(freshRoot, windowContextToken)) {
+                    traceDecision(
+                        decisionId,
+                        DecisionStage.Window,
+                        DecisionOutcome.Failed,
+                        DecisionReason.WindowRootUnavailable,
+                        rule,
+                        "fresh root missing or context mismatch",
+                    )
+                    return
+                }
+                val reacquiredTarget = try {
+                    a11yContext.queryRule(rule, freshRoot)
+                } catch (e: InterruptRuleMatchException) {
+                    traceDecision(decisionId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.StaleContext, rule, "refresh interrupt")
+                    throw e
+                }
+                if (reacquiredTarget == null ||
+                    !nodeMatchesWindow(reacquiredTarget, windowContextToken) ||
+                    !refreshNode(reacquiredTarget)
+                ) {
+                    traceDecision(
+                        decisionId,
+                        DecisionStage.Selector,
+                        DecisionOutcome.Failed,
+                        DecisionReason.NodeRefreshFailed,
+                        rule,
+                        "reacquire failed",
+                    )
+                    return
+                }
+                target = reacquiredTarget
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Selector,
+                    DecisionOutcome.Observed,
+                    DecisionReason.NodeReacquired,
+                    rule,
+                )
+            }
+            if (!windowGenerationState.isCurrent(windowContextToken, actionForeground)) {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Foreground,
+                    DecisionOutcome.Skipped,
+                    DecisionReason.StaleContext,
+                    rule,
+                    "window generation changed while refreshing node",
                 )
                 return
             }
             traceDecision(decisionId, DecisionStage.Action, DecisionOutcome.Submitted, DecisionReason.ActionSubmitted, rule)
             val actionResult = rule.performAction(target)
             if (actionResult.result) {
+                advanceWindowGeneration()
+                markWindowTransition()
                 traceDecision(
                     decisionId,
                     DecisionStage.Action,

@@ -48,10 +48,26 @@ data class ForegroundSnapshot(
     val timestamp: Long,
     val confidence: ForegroundConfidence,
     val surface: ForegroundSurface,
+    val rotation: Int = 0,
 ) {
     val canExecute: Boolean
         get() = confidence == ForegroundConfidence.Confirmed &&
                 surface == ForegroundSurface.Application
+
+    /**
+     * A focused application window may exist briefly before its accessibility root mounts.
+     * This state may request bounded recovery, but must never execute a rule directly.
+     */
+    val canRecoverMissingRoot: Boolean
+        get() = confidence == ForegroundConfidence.Probable &&
+                surface == ForegroundSurface.Application &&
+                task?.appId != null &&
+                task.isFocused &&
+                task.isVisible &&
+                task.isRunning &&
+                window?.kind == ForegroundWindowKind.Application &&
+                window.isFocused &&
+                window.rootAppId == null
 
     /** Task-stack Activity is authoritative; accessibility events are fallback only. */
     fun canUseEventActivityFallback(eventAppId: String): Boolean {
@@ -111,6 +127,7 @@ fun resolveForegroundSnapshot(
     timestamp: Long,
     imeAppId: String = "",
     systemUiAppId: String = "com.android.systemui",
+    rotation: Int = 0,
 ): ForegroundSnapshot {
     val window = selectForegroundWindow(windows, targetDisplayId)
     val taskAppId = task?.appId
@@ -143,5 +160,6 @@ fun resolveForegroundSnapshot(
         timestamp = timestamp,
         confidence = confidence,
         surface = surface,
+        rotation = rotation,
     )
 }

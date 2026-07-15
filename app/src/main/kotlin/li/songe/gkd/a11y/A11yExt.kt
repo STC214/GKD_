@@ -2,6 +2,7 @@ package li.songe.gkd.a11y
 
 import android.content.ComponentName
 import android.provider.Settings
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,19 +73,20 @@ fun AccessibilityNodeInfo.getVid(): CharSequence? {
 const val MAX_CHILD_SIZE = 512
 const val MAX_DESCENDANTS_SIZE = 4096
 
-private const val A11Y_NODE_TIME_KEY = "generatedTime"
+private const val A11Y_NODE_ELAPSED_TIME_KEY = "generatedElapsedTime"
 fun AccessibilityNodeInfo.setGeneratedTime(): AccessibilityNodeInfo {
-    extras.putLong(A11Y_NODE_TIME_KEY, System.currentTimeMillis())
+    extras.putLong(A11Y_NODE_ELAPSED_TIME_KEY, SystemClock.elapsedRealtime())
     return this
 }
 
 fun AccessibilityNodeInfo.isExpired(expiryMillis: Long): Boolean {
-    val generatedTime = extras.getLong(A11Y_NODE_TIME_KEY, -1)
+    val generatedTime = extras.getLong(A11Y_NODE_ELAPSED_TIME_KEY, -1)
     if (generatedTime == -1L) {
         // https://github.com/gkd-kit/gkd/issues/759
         return true
     }
-    return (System.currentTimeMillis() - generatedTime) > expiryMillis
+    val elapsed = SystemClock.elapsedRealtime() - generatedTime
+    return elapsed < 0L || elapsed > expiryMillis
 }
 
 val typeInfo by lazy { initDefaultTypeInfo().globalType }

@@ -1,6 +1,7 @@
 package li.songe.gkd.a11y
 
 import android.view.Display
+import li.songe.gkd.app
 import li.songe.gkd.runtime.foreground.ForegroundSnapshot
 import li.songe.gkd.runtime.foreground.ForegroundWindow
 import li.songe.gkd.runtime.foreground.ForegroundWindowKind
@@ -50,5 +51,6 @@ fun A11yCommonImpl.captureForegroundSnapshot(
         targetDisplayId = targetDisplayId,
         timestamp = timestamp,
         imeAppId = imeAppId,
+        rotation = app.compatDisplay.rotation,
     )
 }

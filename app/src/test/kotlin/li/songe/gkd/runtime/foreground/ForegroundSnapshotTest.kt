@@ -90,6 +90,37 @@ class ForegroundSnapshotTest {
     }
 
     @Test
+    fun `focused application with root not mounted is recoverable but cannot execute`() {
+        val snapshot = resolveForegroundSnapshot(
+            task,
+            listOf(window(3, null, focused = true)),
+            targetDisplayId = 0,
+            timestamp = 123,
+        )
+        assertEquals(ForegroundConfidence.Probable, snapshot.confidence)
+        assertTrue(snapshot.canRecoverMissingRoot)
+        assertFalse(snapshot.canExecute)
+    }
+
+    @Test
+    fun `unfocused or non application window cannot recover missing root`() {
+        val unfocused = resolveForegroundSnapshot(
+            task,
+            listOf(window(3, null, active = true)),
+            targetDisplayId = 0,
+            timestamp = 123,
+        )
+        val systemWindow = resolveForegroundSnapshot(
+            task,
+            listOf(window(3, null, focused = true, kind = ForegroundWindowKind.System)),
+            targetDisplayId = 0,
+            timestamp = 123,
+        )
+        assertFalse(unfocused.canRecoverMissingRoot)
+        assertFalse(systemWindow.canRecoverMissingRoot)
+    }
+
+    @Test
     fun `task and focused window package mismatch is conflict`() {
         val snapshot = resolveForegroundSnapshot(
             task,

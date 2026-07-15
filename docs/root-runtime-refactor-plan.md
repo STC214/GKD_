@@ -288,20 +288,22 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 
 任务：
 
-- [ ] 窗口或 root 暂时为空时采用有限退避重试，例如 50、100、200、400、800ms。
-- [ ] 只在窗口切换、App 切换、屏幕开启或动作完成后的短时间重试。
-- [ ] `TYPE_WINDOW_STATE_CHANGED` 时清理窗口相关缓存。
-- [ ] `TYPE_WINDOW_CONTENT_CHANGED` 时至少失效对应事件分支缓存。
-- [ ] 缩短动态节点缓存有效期，保留可配置和设备回退能力。
-- [ ] 使用节点前调用 `refresh()`；失败后重新取得窗口 root。
-- [ ] 重新取 root 后再次验证 packageName、windowId、displayId 和 generation。
-- [ ] 旧窗口 generation 的选择结果禁止执行动作。
+- [x] 窗口或 root 暂时为空时采用有限退避重试：50、100、200、400、800ms。
+- [x] 只在窗口切换、App 切换、屏幕开启或动作完成后的短时间重试。
+- [x] `TYPE_WINDOW_STATE_CHANGED` 时推进 generation，并在下一轮查询清理窗口相关缓存。
+- [x] `TYPE_WINDOW_CONTENT_CHANGED` 时推进 generation，禁止旧选择结果进入动作。
+- [x] 动态节点缓存默认缩短为文本 500ms、结构 1000ms并改用单调时钟；保留 1000/2000ms 保守设备策略。
+- [x] 使用节点前调用 `refresh()`；失败后重新取得窗口 root。
+- [x] 重新取 root 后再次验证 packageName、windowId、displayId 和 generation。
+- [x] 旧窗口 generation 的选择结果禁止执行动作。
 
 验收：
 
 - 节点延迟挂载时能在有限窗口内恢复匹配。
 - 快速页面切换后不会使用上一页面坐标。
 - 重试达到上限后明确报告失败原因并停止，不持续耗电。
+
+当前实现结果：`WindowRootRecoveryState` 只接受显式切换信号，3 秒窗口内由整个切换共享 5 次退避总预算，root 缺失本身不能开启或延长恢复。焦点 Application Window 已存在但 rootAppId 暂空时，会在普通前台确认之前进入恢复，因此五级链路覆盖主要挂载竞态。`WindowGenerationState` 只为 State/App/亮屏/动作以及 display/rotation 变化推进结构 generation；Content 事件继续进入 pending 查询并清理对应事件分支，避免动态页面全局换代饥饿。`A11yContext` 在下一轮结构查询清空旧 root 与遍历缓存，节点默认缓存缩短为 500/1000ms并使用单调时钟，保留 1000/2000ms 保守策略。选择器结果携带 generation、taskId、windowId、appId、displayId 和 rotation；目标节点必须先 `refresh()`，失败时只在上下文完全一致时重取 root 并复跑同一规则。App 88/88、Selector 18/18、Release 与 Vital Lint 已通过；代码任务已完成，可控 root 缺失故障注入和米游社/哔哩哔哩专项统计仍待真机验收。
 
 ### 阶段 6：抽象并增强动作执行器
 
@@ -458,7 +460,7 @@ test(phase-9): ...
 | 2. 动作结果误判修复 | 已完成 | Root 完成路径、无障碍取消路径、失败不计次数/冷却和订阅不变量均已验收。 |
 | 3. 查询唤醒重构 | 已完成 | `QueryWakeState` 单 runner、有界 pending、常量空间事件缓冲、规则晚加载补查、39 项 App 测试和真机事件风暴冒烟均通过。 |
 | 4. 前台与焦点窗口融合 | 已完成 | 多任务/窗口融合、覆盖层策略、单调时钟 150ms 确认、规则与动作门控、根错配单次补查及 Activity 来源收口均已完成。 |
-| 5. 窗口与节点恢复 | 未开始 | |
+| 5. 窗口与节点恢复 | 进行中 | 代码任务已完成：可达的有限退避、共享总预算、结构 generation、Content 分支失效、单调短缓存、rotation/display 门控和节点重定位均已接入；专项真机验收待完成。 |
 | 6. 动作执行器增强 | 未开始 | |
 | 7. APK 内置 RootService | 未开始 | |
 | 8. 多用户与多显示屏 | 未开始 | |
