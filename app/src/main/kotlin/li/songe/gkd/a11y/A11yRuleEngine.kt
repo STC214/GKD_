@@ -2,6 +2,7 @@ package li.songe.gkd.a11y
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
+import android.os.SystemClock
 import android.util.Log
 import android.view.Display
 import android.view.KeyEvent
@@ -25,11 +26,16 @@ import li.songe.gkd.data.ActionExecutionContext
 import li.songe.gkd.data.ActionExecutionGuard
 import li.songe.gkd.data.ActionResult
 import li.songe.gkd.data.ActionResultState
+import li.songe.gkd.data.ActionVerificationDecision
+import li.songe.gkd.data.ActionVerificationObservation
+import li.songe.gkd.data.ActionVerificationState
+import li.songe.gkd.data.ActionVerificationStateMachine
 import li.songe.gkd.data.AppRule
 import li.songe.gkd.data.GkdAction
 import li.songe.gkd.data.ResolvedRule
 import li.songe.gkd.data.RpcError
 import li.songe.gkd.data.RuleStatus
+import li.songe.gkd.data.shouldObserveAfterAction
 import li.songe.gkd.isActivityVisible
 import li.songe.gkd.runtime.diagnostics.DecisionOutcome
 import li.songe.gkd.runtime.diagnostics.DecisionReason
@@ -649,6 +655,56 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         return true
     }
 
+    private suspend fun verifyActionResult(
+        result: ActionResult,
+        target: AccessibilityNodeInfo,
+        token: WindowContextToken,
+    ): ActionResult {
+        if (!result.shouldObserveAfterAction()) return result
+        val stateMachine = ActionVerificationStateMachine()
+        val startedAt = SystemClock.elapsedRealtime()
+        var delayMillis = 50L
+        while (true) {
+            delay(delayMillis)
+            val snapshot = withTimeoutOrNull(150L) {
+                runInterruptible(Dispatchers.IO) {
+                    runCatching { service.captureForegroundSnapshot(token.displayId) }.getOrNull()
+                }
+            }
+            val elapsed = SystemClock.elapsedRealtime() - startedAt
+            val windowCurrent = snapshot?.let {
+                windowGenerationState.matchesWindowContext(token, it)
+            } ?: true
+            val generationCurrent = windowGenerationState.isGenerationCurrent(token)
+            val decision = stateMachine.observe(
+                elapsedMillis = elapsed,
+                observation = ActionVerificationObservation(
+                    targetAvailable = if (windowCurrent && generationCurrent) {
+                        nodeMatchesWindow(target, token) && refreshNode(target)
+                    } else {
+                        true
+                    },
+                    windowCurrent = windowCurrent,
+                    generationCurrent = generationCurrent,
+                ),
+            )
+            when (decision) {
+                is ActionVerificationDecision.Wait -> delayMillis = decision.delayMillis
+                is ActionVerificationDecision.Verified -> return result.copy(
+                    state = ActionResultState.Verified,
+                    verification = ActionVerificationState.Verified,
+                    verificationSignal = decision.signal,
+                    verificationElapsedMillis = elapsed,
+                )
+
+                ActionVerificationDecision.Inconclusive -> return result.copy(
+                    verification = ActionVerificationState.Inconclusive,
+                    verificationElapsedMillis = elapsed,
+                )
+            }
+        }
+    }
+
     private fun checkFutureStartJob() {
         val t = System.currentTimeMillis()
         if (t - lastTriggerTime < 3000L || t - appChangeTime < 3000L) {
@@ -936,7 +992,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             }
             traceDecision(decisionId, DecisionStage.Action, DecisionOutcome.Submitted, DecisionReason.ActionSubmitted, rule)
             val actionContext = ActionExecutionContext.fromNode(target, windowContextToken)
-            val actionResult = rule.performAction(
+            val submittedResult = rule.performAction(
                 node = target,
                 context = actionContext,
                 guard = ActionExecutionGuard {
@@ -947,6 +1003,11 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                             refreshNode(target)
                 },
             )
+            val actionResult = if (submittedResult.result) {
+                verifyActionResult(submittedResult, target, windowContextToken)
+            } else {
+                submittedResult
+            }
             if (actionResult.result) {
                 advanceWindowGeneration()
                 markWindowTransition()
@@ -956,8 +1017,30 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     DecisionOutcome.Succeeded,
                     DecisionReason.ActionSucceeded,
                     rule,
-                    "action=${actionResult.action}, state=${actionResult.state}, target=${actionResult.target}, backend=${actionResult.backend}, display=${actionResult.displayId}, window=${actionResult.windowId}, rotation=${actionResult.rotation}, windowBounds=${actionResult.windowBounds}, visibleBounds=${actionResult.visibleBounds}, retries=${actionResult.retryCount}",
+                    "action=${actionResult.action}, state=${actionResult.state}, target=${actionResult.target}, backend=${actionResult.backend}, display=${actionResult.displayId}, window=${actionResult.windowId}, rotation=${actionResult.rotation}, windowBounds=${actionResult.windowBounds}, visibleBounds=${actionResult.visibleBounds}, retries=${actionResult.retryCount}, verification=${actionResult.verification}, signal=${actionResult.verificationSignal}, verificationMs=${actionResult.verificationElapsedMillis}",
                 )
+                when (actionResult.verification) {
+                    ActionVerificationState.Verified -> traceDecision(
+                        decisionId,
+                        DecisionStage.Action,
+                        DecisionOutcome.Observed,
+                        DecisionReason.ActionVerified,
+                        rule,
+                        "signal=${actionResult.verificationSignal} elapsed=${actionResult.verificationElapsedMillis}",
+                    )
+
+                    ActionVerificationState.Inconclusive -> traceDecision(
+                        decisionId,
+                        DecisionStage.Action,
+                        DecisionOutcome.Skipped,
+                        DecisionReason.ActionVerificationInconclusive,
+                        rule,
+                        "elapsed=${actionResult.verificationElapsedMillis}; input remains successful and is not retried",
+                    )
+
+                    ActionVerificationState.NotRequested,
+                    ActionVerificationState.Pending -> Unit
+                }
                 val topActivity = topActivityFlow.value
                 rule.trigger()
                 scope.launch(actionDispatcher) {
@@ -982,7 +1065,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                         else -> DecisionReason.ActionRejected
                     },
                     rule,
-                    "action=${actionResult.action}, state=${actionResult.state}, target=${actionResult.target}, backend=${actionResult.backend}, display=${actionResult.displayId}, window=${actionResult.windowId}, rotation=${actionResult.rotation}, windowBounds=${actionResult.windowBounds}, visibleBounds=${actionResult.visibleBounds}, retries=${actionResult.retryCount}",
+                    "action=${actionResult.action}, state=${actionResult.state}, target=${actionResult.target}, backend=${actionResult.backend}, display=${actionResult.displayId}, window=${actionResult.windowId}, rotation=${actionResult.rotation}, windowBounds=${actionResult.windowBounds}, visibleBounds=${actionResult.visibleBounds}, retries=${actionResult.retryCount}, verification=${actionResult.verification}, signal=${actionResult.verificationSignal}, verificationMs=${actionResult.verificationElapsedMillis}",
                 )
             }
         }

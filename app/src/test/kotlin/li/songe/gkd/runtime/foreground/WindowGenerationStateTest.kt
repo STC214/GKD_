@@ -30,6 +30,8 @@ class WindowGenerationStateTest {
         val token = state.capture(snapshot)
         state.advance()
         assertFalse(state.isCurrent(token, snapshot))
+        assertFalse(state.isGenerationCurrent(token))
+        assertTrue(state.matchesWindowContext(token, snapshot))
     }
 
     @Test
@@ -38,6 +40,8 @@ class WindowGenerationStateTest {
         val token = state.capture(snapshot)
         assertFalse(state.isCurrent(token, snapshot.copy(displayId = 1)))
         assertFalse(state.isCurrent(token, snapshot.copy(appId = "other.app")))
+        assertTrue(state.isGenerationCurrent(token))
+        assertFalse(state.matchesWindowContext(token, snapshot.copy(appId = "other.app")))
     }
 
     @Test

@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +61,8 @@ import li.songe.gkd.permission.foregroundServiceSpecialUseState
 import li.songe.gkd.permission.notificationState
 import li.songe.gkd.permission.requiredPermission
 import li.songe.gkd.permission.shizukuGrantedState
+import li.songe.gkd.root.RootServiceClient
+import li.songe.gkd.root.RootServiceState
 import li.songe.gkd.runtime.diagnostics.decisionTraceBuffer
 import li.songe.gkd.service.ActivityService
 import li.songe.gkd.service.ButtonService
@@ -185,6 +188,10 @@ fun AdvancedPage() {
         val shizukuContext by shizukuContextFlow.collectAsState()
         val diagnostics by rootBridgeDiagnosticsFlow.collectAsState()
         val reconnecting by rootBridgeReconnectMutex.state.collectAsState()
+        val apkRootState by RootServiceClient.state.collectAsState()
+        LaunchedEffect(Unit) {
+            RootServiceClient.connect(context)
+        }
         AlertDialog(
             title = { Text(text = "Root 与授权状态") },
             text = {
@@ -202,6 +209,15 @@ fun AdvancedPage() {
                     Text("远端 UID：${diagnostics.remoteUid?.toString() ?: "未知"}")
                     Text("Shell 自检：${if (diagnostics.shellCommandAvailable) "通过" else "未通过"}")
                     Text("UiAutomation：${if (diagnostics.uiAutomationConnected) "已连接" else "未连接"}")
+                    Text(
+                        when (val state = apkRootState) {
+                            RootServiceState.Disconnected -> "APK RootService：未连接"
+                            RootServiceState.Connecting -> "APK RootService：连接中"
+                            is RootServiceState.Connected ->
+                                "APK RootService：已连接，PID ${state.identity.remotePid}，UID ${state.identity.remoteUid}，协议 ${state.identity.protocolVersion}"
+                            is RootServiceState.Failed -> "APK RootService：失败（${state.reason}）"
+                        },
+                    )
                     diagnostics.topActivity?.let { Text("前台 Activity：$it") }
                     if (diagnostics.attempt > 0) {
                         Text("连接尝试：${diagnostics.attempt}/${diagnostics.maxAttempts}")
@@ -228,6 +244,7 @@ fun AdvancedPage() {
                 TextButton(
                     enabled = !reconnecting,
                     onClick = {
+                        RootServiceClient.connect(context)
                         if (shizukuContext.serviceWrapper == null) {
                             retryRootUserService()
                         } else {

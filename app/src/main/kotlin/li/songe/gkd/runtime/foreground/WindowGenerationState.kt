@@ -39,11 +39,18 @@ class WindowGenerationState {
 
     @Synchronized
     fun isCurrent(token: WindowContextToken, snapshot: ForegroundSnapshot): Boolean {
-        return token.generation == generation &&
-                token.taskId == snapshot.task?.taskId &&
+        return token.generation == generation && matchesWindowContext(token, snapshot)
+    }
+
+    fun matchesWindowContext(token: WindowContextToken, snapshot: ForegroundSnapshot): Boolean {
+        return token.taskId == snapshot.task?.taskId &&
                 token.windowId == snapshot.window?.windowId &&
                 token.appId == snapshot.appId &&
                 token.displayId == snapshot.displayId &&
                 token.rotation == snapshot.rotation
     }
+
+    @Synchronized
+    fun isGenerationCurrent(token: WindowContextToken): Boolean =
+        token.generation == generation
 }

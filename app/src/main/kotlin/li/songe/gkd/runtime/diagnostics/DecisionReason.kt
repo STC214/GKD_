@@ -48,6 +48,8 @@ enum class DecisionReason(val label: String) {
     SelectorMiss("选择器未命中"),
     ActionRejected("动作返回失败"),
     ActionCancelled("动作被取消"),
+    ActionVerified("动作结果已观察验证"),
+    ActionVerificationInconclusive("动作结果暂时无法确认"),
     ActionVerificationFailed("动作结果验证失败"),
     QueryAlreadyRunning("已有查询正在执行"),
     QueryDeferred("查询运行中，已合并后续唤醒"),

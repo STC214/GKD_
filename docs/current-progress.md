@@ -19,8 +19,9 @@
 | 3. 查询唤醒状态机 | 已完成 | 单 runner、有界 pending、最新事件补查、常量空间事件缓冲和规则晚加载补查均已实现并验证。 |
 | 4. 前台与焦点窗口融合 | 已完成 | 覆盖层分类、150ms 有界确认、规则查询/动作前门控和结构化诊断已接入；普通应用、SystemUI、输入法、权限弹窗、真实画中画均已真机验收。 |
 | 5. 窗口与节点恢复 | 已完成 | 审查确认的恢复不可达、Content 全局换代、预算重置和缓存时效问题均已修复；米游社/B 站专项采样命中真实缺 root 恢复，未见孤儿事件链、恢复耗尽或崩溃。 |
-| 6. 动作执行器 | 进行中 | 第一批统一执行上下文、display/window/rotation/区域门控、后端回退复核、最近可点击父节点和结构化结果已接入；动作后验证待实现。 |
-| 7～9 | 未开始 | 按主计划依次处理内置 RootService、多用户和稳定性收口。 |
+| 6. 动作执行器 | 已完成 | 统一执行上下文和 350ms 只观察验证已接入；B 站安全导航真机在 104ms 内命中 `Verified/GenerationChanged`，动作字段完整且无重复提交。 |
+| 7. APK 内置 RootService | 进行中 | 非 daemon 握手/生命周期已真机通过；Parcelable 结构化 tap/swipe、参数校验和结果码已实现并构建通过，尚未接入规则动作链。 |
+| 8～9 | 未开始 | 后续处理多用户、多显示屏和稳定性维护收口。 |
 
 阶段 0 尚未关闭的是规则重复统计、B02 和部分依赖真实 App 时机的窗口样本；这些长期采样不阻止已经具备独立测试证据的可靠性修复继续推进。米游社 B01 已补入基线和诊断文档。
 
@@ -60,19 +61,25 @@
 - 统一 `ActionExecutor` 在规则语义与具体动作后端之间接管提交策略；结果携带 target、backend、displayId、windowId、rotation、windowBounds、visibleBounds 和 retryCount。
 - Root 坐标输入显式指定 displayId；Root 失败转无障碍手势前再次通过同一窗口 guard，非默认显示屏没有对应手势能力时直接拒绝。
 - 节点 API 明确拒绝时最多尝试最近一个可见且可点击的父节点；已接受/已完成动作、更多祖先及 back/swipe 等未知副作用动作不自动重复。
+- 成功的 click/longClick/back 等动作最多观察 350ms；节点消失、窗口或 generation 变化升级为 `Verified`，无信号为 `Inconclusive`，两者都不会重复输入。
+- `none`、`swipe` 和失败动作跳过默认验证；无法确认不会被写成 `ActionVerificationFailed`，后者只保留给未来显式、可证明的验证条件。
 
 ## 当前构建和真机状态
 
-- 当前 Git HEAD：`f5c03f8f`；阶段 5 代码、测试和首轮文档已于 2026-07-15 13:02 提交，阶段 5 最终验收文档及阶段 6 第一批代码/文档仍在工作区。
+- 当前 Git HEAD：`abfc9838`；阶段 6 第一批统一动作执行器已于 2026-07-15 13:52 提交，第二批动作验证状态机和文档仍在工作区。
 - Release APK：`app/build/outputs/apk/gkd/release/app-gkd-release.apk`
-- 当前本地 APK SHA-256：`1817E1F99DFCAFEC6CA5D001A3A9F9661DCC382FCC89519254C49AD8B5200848`
-- APK 大小：3,336,575 字节。
-- App Debug 单元测试：91/91；阶段 6 第一批新增 3 项区域边界、交集和双区域门控测试。
+- 当前本地 APK SHA-256：`49FD98F272AD33A0800B8688AEACB1EDAAEBD54A385A423758115238B6FB3505`
+- APK 大小：3,356,704 字节。
+- App Debug 单元测试：115/115；阶段 7 包含 8 项调用者/身份策略与 8 项结构化输入参数测试。
 - Selector JVM 测试：18/18。
 - Release 构建与 `lintVital`：通过。
+- 阶段 7 使用独立包名 `li.songe.gkd.debug` 真机验收：首次握手 PID `26957`、UID 0、协议 1；修复死亡原因覆盖后 PID `29808` 被杀，主进程 PID `20830` 保持运行并显示 `失败（binder died）`；重连得到 PID `30430`。
+- Debug 包强停后 root 子进程自动退出；覆盖更新时旧进程终止；最终 Debug 包已卸载、手机 Download 临时文件已清理，正式版 PID `4014` 与前台 StatusService 未受影响。
 - 测试设备：Xiaomi Android 16，KernelSU + Sui。
 - 最终 Root UserService：UID 0；两个临时探针 App、HTTP 临时服务和 ADB 端口转发均已清除。
-- 当前本地 Release 已非清数据覆盖安装到测试手机；版本 `1.12.1-f5c03f8-dirty`，主进程 PID `12288`，Root UserService PID `29736`、UID 0。StatusService 保持前台；米游社/B 站启动、切换和动态页面滚动后进程稳定，无新增 GKD 崩溃。
+- 当前本地 Release 已非清数据覆盖安装到测试手机；版本 `1.12.1-abfc983-dirty`，阶段 6 安全动作清理并重启后主进程 PID `4014`，Root UserService PID `28853`、UID 0，StatusService 为前台服务。米游社/B 站启动、切换和动态页面滚动后进程稳定，无新增 GKD 崩溃。
+- 阶段 6 真机证据：一次性规则 `-1/app/9903/0` 点击 B 站“分区”，104ms 内记录 `ActionSucceeded(state=Verified)` 与 `ActionVerified(signal=GenerationChanged)`；`target=Node`、`backend=Node`、`display=0`、`window=2447`、rotation、窗口/可见边界和零重试均已导出。完整记录位于忽略目录 `local-assets/diagnostics/root-runtime/phase6-safe-action/decision-diagnostics-final.txt`。
+- 测试清理：HTTP 内存订阅及对应动作日志已由应用删除，ADB 转发已移除，触发总数从测试后的 7728 恢复为测试前 7727；订阅页只保留原有本地/正式订阅。
 - 手机重启后 KernelSU `u:r:ksu:s0` 被 SELinux 拒绝直接读取 App 私有目录，因此本轮没有重复声称文件哈希一致；非清数据证据来自 App 自身成功加载原订阅与动作计数。
 - 最终检查无新增 GKD `AndroidRuntime` 崩溃。
 - 阶段 5 专项采样结束时主进程仍为 PID `24515`，Root UserService PID `18339`、UID 0，StatusService 为前台；诊断开关原本开启且测试后保持开启。
@@ -86,6 +93,11 @@
 - 窗口恢复：新增 `WindowRootRecoveryState.kt`、`WindowGenerationState.kt`；阶段 5 累计 16 项测试，`A11yContext.kt` 按 generation 清缓存，`A11yRuleEngine.kt` 接入五级退避、旧代门控和节点重新定位。
 - 阶段 5 审查修复：`ForegroundSnapshot.canRecoverMissingRoot` 将主要 root 挂载竞态接入有限恢复；`NodeCachePolicy.kt` 提供 Default/Legacy 策略；Content/State generation 分流，rotation 进入快照令牌。
 - 阶段 6 第一批：新增 `ActionExecutor.kt` 和 `ActionExecutionContextTest.kt`；`GkdAction.kt` 统一动作上下文/结果，`ResolvedRule.kt` 和 `A11yRuleEngine.kt` 接入执行 guard，Root 输入链显式传递 displayId。
+- 阶段 6 第二批：新增 `ActionVerification.kt` 和 `ActionVerificationStateMachineTest.kt`；`WindowGenerationState.kt` 提供 generation/窗口上下文独立比较，规则引擎接入只观察验证与结构化诊断。
+- 阶段 7 第一轮审查：当前 `IUserService.execCommand(String)` 和基于 shell 拼接的 tap/swipe 仅保留为 Shizuku/Sui 兼容后端；新 RootService 采用结构化最小 AIDL，优先普通非 daemon libsu 方案，首批只做身份握手、调用方校验和死亡回退。
+- 阶段 7 第一最小切片：新增 `root/IRootService.aidl`、`GkdRootService.kt`、`RootServiceClient.kt`、调用者策略和身份策略；固定 libsu 6.0.0。AIDL 只有协议、PID、UID、包名四个只读字段，设置弹窗按需连接，尚未接管输入。
+- 阶段 7 真机审查修复：Binder 死亡会连续触发 DeathRecipient 与 `onServiceDisconnected`；后者现在保留已有具体失败原因，不再把 `binder died` 降级为普通“未连接”。
+- 阶段 7 第二切片：`RootInputRequest` 只携带数值动作、displayId、坐标、时长和窗口边界；AIDL 事务 5 返回 Completed/Rejected/Unavailable/Failed。服务端完成 NaN/Infinity、越界、时长、动作类型和 Tap 规范化门控，尚未从规则链调用。
 - 构建追溯：`app/build.gradle.kts` 为未提交工作区版本追加 `-dirty`。
 - 动作结果链路：`GkdAction.kt`、`A11yService.kt`、`InputManager.kt`、`InputShellCommand.kt`、`ShizukuApi.kt`、`A11yRuleEngine.kt`。
 - 输入与 Binder 回归：`InputSequenceResult.kt`、`InputSequenceResultTest.kt`、`SafeInvokeShizukuTest.kt`。
@@ -95,19 +107,19 @@
 
 ## 本轮开发停点
 
-- 最后完成项：阶段 6 第一批统一动作执行器。App 91/91、Selector 18/18、Release、Vital Lint 和 Android 16 非清数据覆盖安装冒烟通过。
+- 最后完成项：阶段 7 结构化输入第二切片。参数模型、服务端门控、逐事件注入和结果码已构建通过但未接管动作；App 115/115、Selector 18/18、Release、R8 和 Vital Lint 通过。
 - 首次标题锚点方案被真机探针否定：快照中的 WebView 文本不可供活动选择器查询；文档和测试现以真实 50 节点拓扑为准，不再保留该假设。
 - 下次继续时不需要重复阶段 2 的手势取消、动作计数恢复和订阅哈希验收；只有 APK、签名、规则格式或相关执行链再次变化时才重跑对应基线。
-- 恢复入口：继续阶段 6 动作后验证，先定义不新增订阅字段的默认可验证信号，再接入 `Verified`/`ActionVerificationFailed`，最后做安全重试审查。
-- 当前 APK 为工作区构建 `1.12.1-f5c03f8-dirty`；阶段 6 第一批代码和阶段 5 最终验收文档均尚未提交。
+- 阶段 6 已用 B 站“分区”安全导航完成 `ActionVerified` 验收，不需要为了样本点击米游社签到。`Inconclusive` 与父节点回退仍保留单元测试及未来自然采样，不添加生产调试后门，也不阻塞阶段完成。
+- 当前 APK 为工作区构建 `1.12.1-abfc983-dirty`；阶段 6 第二批代码、真机证据和文档尚未提交。
 
 ## 下一步
 
-进入阶段 6，按以下顺序实施：
+继续阶段 7，按以下顺序实施：
 
-1. 定义无需改变现有订阅格式的默认动作后验证信号和超时边界。
-2. 将节点消失、窗口/generation 变化等可验证结果映射为 `Verified`，验证失败记录 `ActionVerificationFailed`。
-3. 保证仅“动作已完成但验证未通过”的安全策略可进入一次受控复查，不重复发送未知副作用输入。
-4. 补齐验证状态机测试并进行米游社/B 站真实动作回归。
+1. 抽象 `PrivilegedBridge`，把新 RootService、现有 Shizuku/Sui 和纯无障碍能力做成显式状态与 Root → Shizuku → A11y 顺序。
+2. 将 `RootInputRequest` 从阶段 6 已确认的 display/window/visibleBounds 上下文生成，结果码映射到现有 ActionResultState；动作前继续复核同一窗口令牌。
+3. 先让一次性 B 站安全导航样本进入新 Root 后端，验证逐事件 Completed、350ms 只观察验证和无重复提交，再扩展到普通规则。
+4. 补做用户拒绝 root 与 8 秒无回调超时的真机故障注入；订阅数据库与规则格式保持不变。
 
 详细实施顺序见 [`root-runtime-refactor-plan.md`](root-runtime-refactor-plan.md)，代码级迁移方法见 [`upstream-code-delta-guide.md`](upstream-code-delta-guide.md)，真机证据见 [`testing/root-runtime-baseline.md`](testing/root-runtime-baseline.md)。

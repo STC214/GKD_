@@ -315,7 +315,7 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 - [x] 动作执行前再次验证窗口 generation 和节点新鲜度；Root 失败转无障碍前再次复核。
 - [x] 节点点击失败时，只尝试最近一个可点击父节点。
 - [x] 坐标动作携带 displayId、窗口区域、旋转和可见区域信息。
-- [ ] 对可验证动作，在完成后观察节点消失、窗口变化或规则指定条件。
+- [x] 对可验证动作，在完成后观察节点消失、窗口变化或 generation 变化；无信号只记为无法确认。
 - [x] 只有节点 API 明确拒绝后的最近父节点策略允许重试一次。
 - [x] 默认不对已接受、已完成或未知副作用动作重试。
 - [x] 保持现有 `click`、`clickNode`、`clickCenter`、`longClick`、`swipe`、`back` 等规则动作兼容。
@@ -329,21 +329,23 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 
 当前实现结果（第一批）：新增 `ActionExecutionContext`、`ActionExecutionGuard` 与统一 `ActionExecutor`。规则引擎把阶段 5 的 `WindowContextToken` 转换为动作上下文，携带 displayId、windowId、rotation、windowBounds 和 visibleBounds；提交前及 Root 坐标后端失败转无障碍手势前均重新确认 generation、前台和节点新鲜度。Root 输入链显式设置 displayId，非默认显示屏没有对应无障碍手势能力时拒绝回退。节点 API 明确返回 false 时最多尝试最近一个符合条件且可见的父节点，父节点已拒绝后不继续遍历更多祖先；传统 `click` 的节点到坐标兼容路径仍只在前序 API 明确拒绝后进入。动作结果记录 target、backend、窗口上下文和 retryCount。App 91/91、Selector 18/18、Release 与 Vital Lint 已通过；Android 16 非清数据覆盖安装后主进程、UID 0 Root UserService 和 StatusService 正常，米游社/B 站切换冒烟无新增 GKD 崩溃。动作后界面验证尚未实现，阶段 6 保持进行中。
 
+当前实现结果（第二批）：新增纯状态机 `ActionVerificationStateMachine`。成功的 click/clickNode/clickCenter/longClick/back 等动作以单调时钟最多观察 350ms；目标节点消失、task/window/app/display/rotation 变化或结构 generation 变化任一成立即把结果升级为 `Verified` 并记录信号。`none`、`swipe` 和失败动作跳过观察。超时没有信号时记录 `Inconclusive`，原 `Accepted/Completed` 结果、规则计数和冷却保持不变，且不会重发输入；`ActionVerificationFailed` 继续保留给未来显式且可证明的验证条件，不能用“未观察到变化”冒充失败。App 99/99、Selector 18/18、Release 与 Vital Lint 通过。Android 16 真机使用原生 HTTP 内存订阅加载一次性 B 站“分区”安全导航规则 `-1/app/9903/0`，诊断链为 `ActionSubmitted → ActionSucceeded(state=Verified) → ActionVerified(signal=GenerationChanged, elapsed=104)`；结果同时记录 `target=Node`、`backend=Node`、`display=0`、`window=2447`、rotation 和窗口/可见边界，后续旧规则以 `StaleContext` 跳过而未重复动作。测试后内存订阅、动作日志、触发总数和 HTTP/ADB 临时状态均已恢复，阶段 6 完成；父节点回退无自然样本，继续保留单元测试和未来自然诊断，不为此增加生产后门。
+
 ### 阶段 7：接入 APK 内置 RootService
 
 目标：不刷模块，由 APK 自己请求 root 并启动特权 Binder 服务。
 
 任务：
 
-- [ ] 选择并固定 root IPC 实现，优先评估 `libsu RootService`。
-- [ ] 定义最小 AIDL，只暴露前台任务、系统窗口辅助信息、输入注入和必要系统操作。
-- [ ] 对每次连接校验调用方 UID、包名和签名，拒绝第三方 Binder 调用。
-- [ ] root 服务不读取和修改订阅数据库，不解析远程规则。
-- [ ] root 服务不开放任意 shell 字符串执行接口。
-- [ ] 输入动作使用结构化参数，校验坐标、显示屏和动作类型。
+- [x] 选择并固定 root IPC 实现：libsu 6.0.0 普通非 daemon `RootService`。
+- [ ] 定义最小 AIDL：身份握手和结构化输入已完成；前台任务、系统窗口辅助信息仍待后续按需加入。
+- [x] 对每次调用校验调用方 UID、包名和共享 UID 下的签名一致性，拒绝第三方 Binder 调用。
+- [x] root 服务不读取和修改订阅数据库，不解析远程规则。
+- [x] root 服务不开放任意 shell 字符串执行接口。
+- [x] 输入动作使用 Parcelable 结构化参数，校验动作类型、displayId、有限坐标、窗口边界和时长。
 - [ ] 处理用户拒绝 root、root 被撤销、Binder 死亡、App 更新和 root 服务重启。
 - [ ] 提供 Root、Shizuku/现有特权通道、纯无障碍三个后端的显式状态和回退顺序。
-- [ ] 默认先使用非 daemon root 服务；只有真机证明生命周期不足时再评估 daemon 模式。
+- [x] 默认使用非 daemon root 服务；只有真机证明生命周期不足时再评估 daemon 模式。
 
 建议回退顺序：
 
@@ -362,6 +364,10 @@ A11y-only
 - root 被拒绝时订阅、设置、规则编辑和无障碍模式仍可使用。
 - App 卸载后不遗留项目 daemon、二进制或可执行脚本。
 - AIDL 不存在任意命令执行入口。
+
+当前实现结果（第一最小切片）：固定 `com.github.topjohnwu.libsu:service:6.0.0`，新增四个只读握手方法，客户端校验协议、远端 PID、UID 0 与包名，并监听 Binder 死亡、空 Binder及 8 秒连接超时。服务端每次调用都核对安装 App UID、UID 包列表和签名一致性；没有 shell、路径、输入、订阅或数据库入口。“Root 与授权状态”弹窗按需连接，不影响当前动作后端。Android 16 真机首次连接为 PID `26957`/UID 0/协议 1；杀死后发现 `onServiceDisconnected` 会覆盖 `binder died`，修复并覆盖更新后以 PID `29808` 复测，界面稳定保留 `失败（binder died）`，主进程 PID `20830` 未崩溃；再次连接得到 PID `30430`。强停 Debug 主进程后 root 子进程退出，覆盖更新与卸载后也无残留。App 107/107、Selector 18/18、Release/R8/Vital Lint 通过，最小握手切片完成；阶段 7 继续进入结构化输入。
+
+当前实现结果（第二切片）：AIDL 事务 5 接收 `RootInputRequest` Parcelable，不接受字符串。请求仅含动作类型、displayId、两组坐标、时长及整数窗口边界；服务端先拒绝未知动作、负 displayId、非法边界、NaN/Infinity、半开边界外坐标、超过 10 秒的动作、零时长 swipe 和端点不一致的 tap，再通过系统 `IInputManager` 逐事件注入。结果固定为 Completed/Rejected/Unavailable/Failed。客户端仅在已握手 Binder 上调用，远端异常会清除服务引用并进入失败状态。新增 8 项参数测试后 App 115/115、Selector 18/18、Release/R8/Vital Lint 通过；尚未接入规则链，也未用生产调试后门触发真机输入。
 
 ### 阶段 8：多用户、多显示屏和厂商窗口适配
 
@@ -463,8 +469,8 @@ test(phase-9): ...
 | 3. 查询唤醒重构 | 已完成 | `QueryWakeState` 单 runner、有界 pending、常量空间事件缓冲、规则晚加载补查、39 项 App 测试和真机事件风暴冒烟均通过。 |
 | 4. 前台与焦点窗口融合 | 已完成 | 多任务/窗口融合、覆盖层策略、单调时钟 150ms 确认、规则与动作门控、根错配单次补查及 Activity 来源收口均已完成。 |
 | 5. 窗口与节点恢复 | 已完成 | 有限退避、共享总预算、结构 generation、Content 分支失效、单调短缓存、rotation/display 门控和节点重定位均已接入；米游社/B 站专项真机验收通过。 |
-| 6. 动作执行器增强 | 未开始 | |
-| 7. APK 内置 RootService | 未开始 | |
+| 6. 动作执行器增强 | 已完成 | 统一执行器、窗口/显示屏门控、最近父节点策略和只观察验证均已接入；B 站安全导航真机在 104ms 内命中 `Verified/GenerationChanged`，无重复动作。 |
+| 7. APK 内置 RootService | 进行中 | 非 daemon 握手与生命周期已真机通过；结构化 tap/swipe、参数门控和结果码已实现并构建通过，下一步接入显式特权桥并做安全动作验收。 |
 | 8. 多用户与多显示屏 | 未开始 | |
 | 9. 稳定性与维护收口 | 未开始 | |
 

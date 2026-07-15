@@ -6,11 +6,16 @@ import android.view.InputEvent
 import android.view.Display
 import androidx.annotation.WorkerThread
 import li.songe.gkd.util.AndroidTarget
+import rikka.shizuku.SystemServiceHelper
 
 
 class SafeInputManager(private val value: IInputManager) {
     companion object {
         fun newBinder() = getShizukuService(Context.INPUT_SERVICE)?.let {
+            SafeInputManager(IInputManager.Stub.asInterface(it))
+        }
+
+        fun newRootBinder() = SystemServiceHelper.getSystemService(Context.INPUT_SERVICE)?.let {
             SafeInputManager(IInputManager.Stub.asInterface(it))
         }
     }

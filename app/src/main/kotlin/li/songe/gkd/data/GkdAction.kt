@@ -42,6 +42,9 @@ data class ActionResult(
     val windowBounds: ActionBounds? = null,
     val visibleBounds: ActionBounds? = null,
     val retryCount: Int = 0,
+    val verification: ActionVerificationState = ActionVerificationState.NotRequested,
+    val verificationSignal: ActionVerificationSignal? = null,
+    val verificationElapsedMillis: Long = 0L,
 )
 
 @Serializable

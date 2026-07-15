@@ -826,7 +826,7 @@ a11y/ForegroundSnapshotProvider.kt
 
 ### 9.5 阶段 5：窗口与节点 generation
 
-状态：`COMPLETE`。代码和审查修复已提交为 `f5c03f8f`，Android 16 专项真机验收已完成，最终验收文档尚在工作区。
+状态：`COMPLETE`。代码和审查修复已提交为 `f5c03f8f`，最终 Android 16 专项真机验收文档随阶段 6 第一批提交 `abfc9838` 入库。
 
 新增：
 
@@ -856,12 +856,13 @@ runtime/foreground/WindowGenerationState.kt
 
 ### 9.6 阶段 6：动作执行器
 
-状态：`IN PROGRESS`（`f5c03f8f` 之上的工作区）。第一批统一提交边界、动作上下文、父节点策略和显式 displayId 已完成，动作后验证待实现。
+状态：`COMPLETE`（`abfc9838` 之上的工作区）。第一批统一提交边界已提交；第二批只观察动作验证已实现并完成安全真机动作验收，等待统一提交。
 
 当前新增：
 
 ```text
 data/ActionExecutor.kt
+data/ActionVerification.kt
 ```
 
 当前迁移：
@@ -872,33 +873,40 @@ data/ActionExecutor.kt
 - `InputShellCommand.kt`、`InputManager.kt`、`ShizukuApi.kt` 和 `UserService.kt` 显式传递 displayId；Root shell 使用 `input -d <displayId>`。
 - 最近可点击父节点只在节点 API 返回 false 后尝试，最多一个；已接受/已完成动作和其他未知副作用动作不重复。
 - windowBounds 与屏幕区域取交集形成 visibleBounds，坐标点采用 Android Rect 的右/下排他边界。
+- `ActionVerificationStateMachine` 对成功的 click/longClick/back 最多观察 350ms；节点消失、窗口变化或 generation 变化映射为 `Verified`，稳定超时映射为 `Inconclusive`。
+- `Inconclusive` 保留原动作成功、计数和冷却且不重发；普通观察超时不得使用 `ActionVerificationFailed`。`none`、`swipe` 和失败动作跳过观察。
 
 第一批验证：App 91/91、Selector 18/18、Release、Vital Lint 通过。Android 16 非清数据覆盖安装后 Root UserService UID 0、StatusService 前台，米游社/B 站切换冒烟无崩溃。父节点回退和动作诊断仍需真实业务动作专项验收。
 
-后续预计新增动作验证状态机；暂不提前创建空的 `ActionRequest`、`ActionOutcome`、`A11yActionExecutor` 或 `RootActionExecutor` 文件，待职责能从现有 performer 中真实拆出时再迁移，避免只有类名没有边界。
+暂不提前创建空的 `ActionRequest`、`ActionOutcome`、`A11yActionExecutor` 或 `RootActionExecutor` 文件，待职责能从现有 performer 中真实拆出时再迁移，避免只有类名没有边界。
+
+第二批验证：App 99/99、Selector 18/18、Release、Vital Lint 和 Android 16 覆盖安装通过。一次性 B 站安全导航规则 `-1/app/9903/0` 真机产生 `clickNode → Verified`，104ms 内以 `GenerationChanged` 命中 `ActionVerified`；结果携带 Node 后端、display 0、window 2447、rotation、windowBounds、visibleBounds 和零重试，随后旧规则以 `StaleContext` 跳过。完整证据位于 `local-assets/diagnostics/root-runtime/phase6-safe-action/decision-diagnostics-final.txt`；临时订阅、动作日志、触发总数、HTTP 服务和 ADB 转发均已恢复。父节点回退没有自然样本，保留单元测试覆盖，不增加生产调试入口。
 
 官方新增动作时，应先加入公共动作语义，再分别实现 A11y 和 Root 后端，不能只实现 Root 版本。
 
 ### 9.7 阶段 7：APK 内置 RootService
 
-预计新增：
+阶段 7 第一最小切片实际新增：
 
 ```text
-root/ipc/*.aidl
-root/service/GkdRootService.kt
-root/system/RootActivityTaskManager.kt
-root/system/RootInputManager.kt
-root/system/RootWindowManager.kt
-runtime/privilege/PrivilegedBridge.kt
-runtime/privilege/RootPrivilegedBridge.kt
+app/src/main/aidl/li/songe/gkd/root/IRootService.aidl
+app/src/main/aidl/li/songe/gkd/root/RootInputRequest.aidl
+app/src/main/kotlin/li/songe/gkd/root/GkdRootService.kt
+app/src/main/kotlin/li/songe/gkd/root/RootServiceClient.kt
+app/src/main/kotlin/li/songe/gkd/root/RootServiceIdentity.kt
+app/src/main/kotlin/li/songe/gkd/root/RootCallerVerifier.kt
+app/src/main/kotlin/li/songe/gkd/root/RootInputRequest.kt
+app/src/test/kotlin/li/songe/gkd/root/RootServiceIdentityTest.kt
+app/src/test/kotlin/li/songe/gkd/root/RootCallerVerifierTest.kt
+app/src/test/kotlin/li/songe/gkd/root/RootInputRequestTest.kt
 ```
 
 预计修改：
 
-- `app/build.gradle.kts`：增加 root IPC 依赖和构建配置。
-- `AndroidManifest.xml`：仅添加 RootService 所需声明；不得导出任意特权 Service。
-- App 初始化和设置页：连接、授权、状态、回退。
-- ProGuard/R8：保留 AIDL、root service 和反射/隐藏 API 必需符号。
+- `gradle/libs.versions.toml`、`app/build.gradle.kts`：固定并引入 `com.github.topjohnwu.libsu:service:6.0.0`。
+- `AdvancedPage.kt`：仅在用户打开“Root 与授权状态”时按需连接并显示身份，不在 App 冷启动时强制弹 root 授权。
+- `AndroidManifest.xml`：本切片无需新增 Service 声明；libsu 通过显式组件启动 APK 代码，禁止把 RootService 声明成导出服务。
+- ProGuard/R8：当前类引用和 AIDL 在 Release R8 中通过；后续增加反射或隐藏 API 时再添加最小 keep 规则。
 
 安全不变量：
 
@@ -908,6 +916,27 @@ runtime/privilege/RootPrivilegedBridge.kt
 - root 服务不下载、不解析、不保存订阅。
 - root 服务不直接操作 Room 数据库。
 - root 被拒绝或死亡时普通 App 不崩溃。
+
+第一轮审查结论（2026-07-15）：
+
+- 审查时工程仅依赖 Shizuku 13.1.5、尚未引入 libsu；AIDL 构建已经开启，可复用现有生成链路。当前实现状态以紧随其后的“第二轮实现记录”为准。
+- 现有 `shizuku/IUserService.aidl` 暴露 `execCommand(String)`；`tap`、`swipe`、文件截图和旧服务清理均在 `UserServiceWrapper`/`UserService` 中拼接 shell。它只能保留为当前 Shizuku/Sui 兼容后端，不能复制进新的 RootService AIDL。
+- 优先采用普通非 daemon `libsu RootService`。官方 API 明确普通服务在无客户端时销毁、App 更新或删除时终止，且库不会自动重连；这与“不留 daemon”的目标一致，重连继续由 App 侧有界状态机负责。daemon 模式暂不启用。
+- 第一最小切片只建立 RootService 连接、协议版本、远端 pid/uid 和调用方校验，不接管输入。通过后再加入结构化 `tap/swipe`，最后评估任务、窗口和截图；每一步都保留现有 Shizuku 与纯无障碍回退。
+- AIDL 不允许字符串命令、文件路径或订阅内容。调用入口统一校验 `Binder.getCallingUid()` 等于当前安装 App UID，包列表包含 `li.songe.gkd`，签名摘要与当前安装包一致；输入参数另行校验 displayId、坐标、时长和屏幕边界。
+- `killLegacyService` 改为 root 进程内部实现或迁移期一次性清理，不作为公开 Binder 方法；RootService 不读取 Room、订阅目录、远程规则或备份。
+
+第二轮实现记录（2026-07-15）：
+
+- 已固定 libsu 6.0.0；普通非 daemon 模式由客户端绑定持有，不添加 `CATEGORY_DAEMON_MODE`，也不落地脚本或二进制。
+- `IRootService` 握手方法 `getProtocolVersion/getRemotePid/getRemoteUid/getServicePackageName` 的事务号固定为 1～4；结构化 `performInput(in RootInputRequest)` 固定为事务 5。任何上游合并都不得把旧 `execCommand(String)` 搬入此接口。
+- `GkdRootService` 在每个事务内读取 `Binder.getCallingUid()`，要求等于当前安装包 UID、UID 包列表包含自身，且列表内所有共享 UID 包均与自身签名匹配；失败抛出 `SecurityException`。
+- `RootServiceClient` 只接受协议 1、PID 大于 0、UID 0、服务包名与组件包名一致的连接；注册 `linkToDeath`，并处理 disconnected、binding died、null binding、同步异常和 8 秒无回调超时。
+- 设置页只负责按需连接和展示，不把此连接加入动作回退链。新增 8 项纯策略测试；App 107/107、Selector 18/18、Release/R8/Vital Lint 通过。
+- 独立 Debug APK 最终通过系统安装器完成安装与覆盖更新，正式包未被覆盖。真机首次握手 PID `26957`、UID 0、协议 1；修复双回调状态覆盖后，PID `29808` 被杀时主进程 PID `20830` 保持运行且展示 `失败（binder died）`，重连生成 PID `30430`。强停、覆盖更新和卸载后均无 root daemon 残留；测试包及手机 Download 临时文件已清理。
+- 合并时必须保留死亡原因优先级：DeathRecipient 已写入具体失败时，后续 `onServiceDisconnected` 不得降级成 `Disconnected`；显式 `disconnect()` 仍以 `Disconnected` 收口。
+- 第二切片只允许 Parcelable 数值输入：动作 1=tap、2=swipe；结果 1=Completed、2=Rejected、3=Unavailable、4=Failed。必须保留负 displayId、非法边界、非有限坐标、半开边界越界、时长和非规范 Tap 校验，不能退回 shell 字符串。
+- `SafeInputManager.newRootBinder()` 只在 UID 0 RootService 内取得系统 `IInputManager`；现有 `newBinder()` 和 Shizuku 包装保持不变。规则链尚未调用 `RootServiceClient.performInput()`，合并上游时不能把“接口存在”误写成“Root 已接管动作”。
 
 ### 9.8 阶段 8：多用户和多显示屏
 
@@ -1357,11 +1386,12 @@ common/gkd.apk
 
 截至 2026-07-15：
 
-- 当前 HEAD 为 `f5c03f8f`；阶段 0.5～5、米游社兼容及阶段 5 审查修复均已提交，只有本轮最终真机验收文档仍在工作区。
+- 当前 HEAD 为 `abfc9838`；阶段 0.5～5、阶段 6 第一批统一动作执行器及对应真机文档均已提交，第二批动作验证状态机仍在工作区。
 - 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
 - 阶段 1 已由米游社有效 B01 现场完成闭环：连续查询稳定终止于 `SelectorMiss`，窄范围兼容层随后完成真实未签到点击、弹窗关闭和累计签到天数变化验收。
-- 当前 Release 为 `1.12.1-f5c03f8-dirty`，SHA-256 `1817E1F99DFCAFEC6CA5D001A3A9F9661DCC382FCC89519254C49AD8B5200848`，3,336,575 字节；App 91/91、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装：主进程 PID `12288`，Root UserService PID `29736`、UID 0，StatusService 为前台；米游社/B 站切换及动态页面滚动后无新增 GKD `AndroidRuntime`。
+- 当前 Release 为 `1.12.1-abfc983-dirty`，SHA-256 `52B32B7C8B06EABB999998556D1716275B6AC8FB61E43B1623ADA8E5429D3315`，3,336,567 字节；App 99/99、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装；安全动作验收清理并重启后主进程 PID `4014`，Root UserService PID `28853`、UID 0，StatusService 为前台服务，最近 10 分钟无新增 GKD `AndroidRuntime`。
 - 真机已恢复 Root/自动化原配置，Root UserService UID 0，临时 HTTP 服务和快照已清除。重启后的 KernelSU `ksu` SELinux 域不能直接读取 App 私有目录，因此本轮未重复宣称配置/订阅文件哈希验收，改用 App 首页实际加载结果作为非清数据证据。
-- 阶段 3、4、5 已完成，阶段 6 第一批统一动作执行器已完成；下一步实现动作后验证。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
+- 阶段 3、4、5、6 已完成；阶段 7 的非 daemon 握手已真机验收，结构化 tap/swipe 接口与参数门控已实现但未接管规则链，下一步建立显式 PrivilegedBridge 并做安全动作验收。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
+- 阶段 6 安全动作最终清理状态覆盖上方早期冒烟快照：触发总数已恢复为测试前的 7727，内存订阅及对应动作日志、临时 HTTP 服务和 ADB 转发均已清除；最终进程与诊断证据以本节上一条 Release 记录和 `current-progress.md` 为准。
 
 最新整体状态以 [`current-progress.md`](current-progress.md) 为入口；本文仍负责记录每项代码级差异和未来上游迁移方法。

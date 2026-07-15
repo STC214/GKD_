@@ -227,6 +227,7 @@ dependencies {
     compileOnly(project(":hidden_api"))
     implementation(libs.rikka.shizuku.api)
     implementation(libs.rikka.shizuku.provider)
+    implementation(libs.libsu.service)
     implementation(libs.lsposed.hiddenapibypass)
 
     implementation(libs.androidx.room.runtime)
