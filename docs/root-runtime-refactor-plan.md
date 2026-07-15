@@ -163,7 +163,7 @@ RootActionExecutor
 
 ### 阶段 1：增加决策诊断，不改变执行逻辑
 
-状态：`CURRENT`。代码、单元测试、2048 条容量版和哔哩哔哩真机链路已完成；等待后续 B01/B02 有效现场验证。
+状态：`已完成（2026-07-15）`。代码、单元测试、2048 条容量版、哔哩哔哩成功链路和米游社有效 B01 漏执行现场均已完成；诊断已把故障明确定位到订阅选择器失配，而不是 Root、窗口 root 或动作执行。
 
 目标：让每次未执行都能回答“停在哪一层”。
 
@@ -197,6 +197,8 @@ RootActionExecutor
 
 当前真机结果：开启诊断后切换到哔哩哔哩，已看到 `667/app/...` 规则的 `RuleEligible`、`ForcedRuleSkipped` 等稳定原因，并能按同一关联 ID 回看事件、前台和规则阶段。首轮 512 条容量在高频事件下约十秒填满；最终 2048 条版同场景只使用 91 条。返回 GKD 时，自身 `NoApplicableRules` 仅作为普通观察，不覆盖目标应用最近失败；本次保留的最近失败为安全中心事件与哔哩哔哩前台不一致，详情 `foreground=tv.danmaku.bili`。
 
+`2026-07-15` 米游社有效现场中，规则 `667/app/8/0` 在窗口 root 可用后持续终止于 `SelectorMiss`，依赖规则 1–3 均为 `PrerequisiteUnsatisfied`，没有进入动作阶段。已签到/未签到双快照进一步确认 WebView 的 `text` 为空且页面容器结构变化。阶段 1 的目标“每次未执行能回答停在哪一层”已获得真实故障闭环，后续现场采样转为回归验证，不再作为阶段完成阻塞。
+
 ### 阶段 2：修复动作结果误判
 
 目标：在引入重试前，先保证成功和失败结果可信。
@@ -223,15 +225,18 @@ RootActionExecutor
 
 目标：查询期间到达的新事件一定会触发后续查询，但不会无限堆积。
 
+状态：`已完成（2026-07-15）`。启动子场景和查询中事件窗口均已修复：规则汇总晚加载会刷新当前 Activity；查询运行时的新请求合并为一个有界 pending 唤醒，当前轮结束后立即接续。星铁静止页、并发状态机测试和真机事件风暴冒烟均已通过。
+
 任务：
 
-- [ ] 用 conflated channel、原子 dirty flag 或等价状态机替换单纯的 `if (querying) return`。
-- [ ] 查询期间收到事件时标记 pending。
-- [ ] 当前查询结束后，只要 pending 或事件集合非空，立即再运行一轮。
-- [ ] 合并重复事件，只保留足以表达最新界面状态的信息。
-- [ ] 保留优先规则的中断能力，但中断后必须消费最新状态。
-- [ ] 为启动、App 切换、动作完成分别定义有限的后续查询窗口。
-- [ ] 增加并发、事件风暴和慢选择器测试。
+- [x] 用有界 `QueryWakeState` 替换单纯的 `if (querying) return`。
+- [x] 查询期间收到事件时合并为一个 pending 请求。
+- [x] 当前查询结束后若存在 pending，保持单 runner 所有权并立即接续一轮。
+- [x] 同类事件只保留最后两个；混合事件折叠为 root 查询标志，缓冲常量有界。
+- [x] 保留既有 `interruptKey` 优先规则中断能力，最新事件仍进入 pending 补查。
+- [x] 保留启动、App 切换、动作完成的有限 300ms 后续查询窗口。
+- [x] 规则汇总晚于自动化连接时刷新当前 Activity，并触发一次有限 forced query。
+- [x] 增加并发、事件风暴、慢查询 handoff 和请求优先级测试。
 
 验收：
 
@@ -246,12 +251,12 @@ RootActionExecutor
 
 任务：
 
-- [ ] 扩展隐藏 `TaskInfo` 映射，读取 `userId`、`taskId`、`effectiveUid`、`displayId`、`isFocused`、`isVisible` 和 `isRunning`。
-- [ ] 获取多条任务，不再直接使用 `getTasks().firstOrNull()`。
-- [ ] 优先选择目标显示屏上 `isFocused && isVisible && isRunning` 的任务。
-- [ ] 从 `AccessibilityWindowInfo` 中选择 `isFocused` 的窗口，记录 `isActive`、类型、层级、显示屏和窗口 ID。
-- [ ] 从焦点窗口 root 获取真实节点包名。
-- [ ] 建立统一的 `ForegroundSnapshot`，至少包含任务、Activity、窗口包、用户、显示屏、时间戳和置信度。
+- [x] 扩展隐藏 `TaskInfo` 映射，读取 `userId`、`taskId`、`effectiveUid`、`displayId`、`isFocused`、`isVisible` 和 `isRunning`。
+- [x] 获取多条任务，不再直接使用 `getTasks().firstOrNull()`。
+- [x] 优先选择目标显示屏上 `isFocused && isVisible && isRunning` 的任务。
+- [x] 从 `AccessibilityWindowInfo` 中选择 `isFocused` 的窗口，记录 `isActive`、类型、层级、显示屏和窗口 ID。
+- [x] 从焦点窗口 root 获取真实节点包名。
+- [x] 建立统一的 `ForegroundSnapshot`，至少包含任务、Activity、窗口包、用户、显示屏、时间戳和置信度。
 - [ ] 为输入法、SystemUI、权限控制器、画中画和覆盖层制定明确策略。
 - [ ] Task 与窗口短暂冲突时延迟 50～300ms 确认，不立即切换规则上下文。
 - [ ] 未确认时宁可暂缓动作，不在错误窗口执行。
@@ -442,12 +447,12 @@ test(phase-9): ...
 
 | 阶段 | 状态 | 验收记录 |
 | --- | --- | --- |
-| 0. 兼容基线与复现集 | 进行中 | Root 真机、升级前后快照、当前 HEAD 原地升级、App 自带备份恢复和 10 条真实规则样本已建立；等待规则重复统计、窗口场景与两个核心故障复现，见 `docs/testing/root-runtime-baseline.md`。 |
+| 0. 兼容基线与复现集 | 进行中 | Root 真机、升级前后快照、当前 HEAD 原地升级、App 自带备份恢复和 10 条真实规则样本已建立；B01 已完成，继续等待规则重复统计、剩余窗口场景和 B02，见 `docs/testing/root-runtime-baseline.md`。 |
 | 0.5 Root 桥真实性与自恢复 | 已完成 | Root UserService UID 0、系统 Binder 8/8、UiAutomation 共存、有限重连、手动检测、订阅哈希和通知权限拒绝下的外部冷启动均已真机验收。 |
-| 1. 决策诊断 | 进行中 | 结构化枚举、关联 ID、2048 条内存环形缓冲、规则引擎关键分支、高级设置预览/复制和哔哩哔哩真机链路已完成；等待 B01/B02 有效现场。 |
+| 1. 决策诊断 | 已完成 | 结构化枚举、关联 ID、2048 条环形缓冲、导出和 UI 已完成；米游社有效 B01 已稳定定位为 `WindowRootAvailable → SelectorMiss`，证明诊断可闭环真实漏执行。 |
 | 2. 动作结果误判修复 | 已完成 | Root 完成路径、无障碍取消路径、失败不计次数/冷却和订阅不变量均已验收。 |
-| 3. 查询唤醒重构 | 未开始 | |
-| 4. 前台与焦点窗口融合 | 未开始 | |
+| 3. 查询唤醒重构 | 已完成 | `QueryWakeState` 单 runner、有界 pending、常量空间事件缓冲、规则晚加载补查、39 项 App 测试和真机事件风暴冒烟均通过。 |
+| 4. 前台与焦点窗口融合 | 进行中 | 第一批多任务选择、焦点窗口采样和统一快照模型已完成；覆盖层策略、冲突确认和规则接入待完成。 |
 | 5. 窗口与节点恢复 | 未开始 | |
 | 6. 动作执行器增强 | 未开始 | |
 | 7. APK 内置 RootService | 未开始 | |

@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.RemoteException
+import android.view.Display
 import androidx.annotation.WorkerThread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -18,6 +19,8 @@ import li.songe.gkd.appScope
 import li.songe.gkd.isActivityVisible
 import li.songe.gkd.permission.shizukuGrantedState
 import li.songe.gkd.permission.updatePermissionState
+import li.songe.gkd.runtime.foreground.ForegroundTask
+import li.songe.gkd.runtime.foreground.selectForegroundTask
 import li.songe.gkd.service.ExposeService
 import li.songe.gkd.service.StatusService
 import li.songe.gkd.service.currentAppBlocked
@@ -165,7 +168,48 @@ class ShizukuContext(
             ?: emptyList()
     }
 
-    fun topCpn(): ComponentName? = getTasks().firstOrNull()?.topActivity
+    fun getForegroundTask(targetDisplayId: Int = Display.DEFAULT_DISPLAY): ForegroundTask? {
+        val tasks = getTasks(16)
+        if (!AndroidTarget.Q) {
+            return tasks.firstOrNull()?.let { task ->
+                @Suppress("DEPRECATION")
+                ForegroundTask(
+                    taskId = task.id,
+                    userId = currentUserId,
+                    effectiveUid = -1,
+                    displayId = Display.DEFAULT_DISPLAY,
+                    isFocused = true,
+                    isVisible = true,
+                    isRunning = true,
+                    appId = task.topActivity?.packageName,
+                    activityId = task.topActivity?.className,
+                )
+            }
+        }
+        return tasks.mapIndexed { index, task ->
+            val hidden = task.casted
+            ForegroundTask(
+                taskId = hidden.taskId,
+                userId = hidden.userId,
+                // effectiveUid was added to TaskInfo in Android 16.
+                effectiveUid = if (AndroidTarget.BAKLAVA) hidden.effectiveUid else -1,
+                displayId = hidden.displayId,
+                // isFocused/isVisible were added in Android 12. Older releases
+                // can only retain the system-provided task ordering.
+                isFocused = if (AndroidTarget.S) hidden.isFocused else index == 0,
+                isVisible = if (AndroidTarget.S) hidden.isVisible else index == 0,
+                isRunning = hidden.isRunning,
+                appId = task.topActivity?.packageName,
+                activityId = task.topActivity?.className,
+            )
+        }.let { selectForegroundTask(it, targetDisplayId) }
+    }
+
+    fun topCpn(): ComponentName? = getForegroundTask()?.let { task ->
+        val appId = task.appId ?: return@let null
+        val activityId = task.activityId ?: return@let null
+        ComponentName(appId, activityId)
+    }
 
     init {
         if (activityTaskManager != null) {

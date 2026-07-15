@@ -21,6 +21,7 @@ import li.songe.gkd.util.UpdateTimeOption
 import li.songe.gkd.util.checkSubsUpdate
 import li.songe.gkd.util.launchTry
 import li.songe.gkd.util.mapState
+import li.songe.gkd.util.ruleSummaryFlow
 import li.songe.selector.MatchOption
 import li.songe.selector.QueryContext
 import li.songe.selector.Selector
@@ -147,6 +148,29 @@ private fun initRuleChangedLog() {
     }
 }
 
+private fun initRuleSummaryRefresh() {
+    appScope.launch(Dispatchers.Default) {
+        ruleSummaryFlow.drop(1).collect { summary ->
+            val changed = synchronized(topActivityFlow) {
+                if (activityRuleFlow.value.ruleSummary === summary) {
+                    false
+                } else {
+                    val topActivity = topActivityFlow.value
+                    updateTopActivity(
+                        appId = topActivity.appId,
+                        activityId = topActivity.activityId,
+                        scene = ActivityScene.RuleSummary,
+                    )
+                    true
+                }
+            }
+            if (changed) {
+                A11yRuleEngine.onRuleSummaryChanged()
+            }
+        }
+    }
+}
+
 private const val volumeChangedAction = "android.media.VOLUME_CHANGED_ACTION"
 private fun createVolumeReceiver() = object : BroadcastReceiver() {
     var lastVolumeTriggerTime = -1L
@@ -224,6 +248,7 @@ private fun initScreenStateReceiver() {
 }
 
 fun initA11yFeat() {
+    initRuleSummaryRefresh()
     initRuleChangedLog()
     initCaptureVolume()
     initScreenStateReceiver()

@@ -44,6 +44,7 @@ enum class DecisionReason(val label: String) {
     ActionCancelled("动作被取消"),
     ActionVerificationFailed("动作结果验证失败"),
     QueryAlreadyRunning("已有查询正在执行"),
+    QueryDeferred("查询运行中，已合并后续唤醒"),
     EventQueueEmpty("事件队列已被消费"),
     StaleContext("前台或事件上下文已变化"),
     ForcedRuleSkipped("规则不在强制查询窗口"),

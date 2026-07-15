@@ -18,14 +18,20 @@ data class GitInfo(
     val commitId: String,
     val commitTime: String,
     val tagName: String?,
+    val isDirty: Boolean,
 ) {
-    val versionNameSuffix get() = if (tagName == null) ("-" + commitId.take(7)) else null
+    val versionNameSuffix
+        get() = buildString {
+            if (tagName == null) append("-").append(commitId.take(7))
+            if (isDirty) append("-dirty")
+        }.ifEmpty { null }
 }
 
 val gitInfo = GitInfo(
     commitId = "git rev-parse HEAD".runCommand(),
     commitTime = "git log -1 --format=%ct".runCommand() + "000",
     tagName = runCatching { "git describe --tags --exact-match".runCommand() }.getOrNull(),
+    isDirty = "git status --porcelain --untracked-files=normal".runCommand().isNotBlank(),
 )
 
 val debugSuffixPairList by lazy {

@@ -138,6 +138,7 @@ sealed class ActivityScene {
     data object ScreenOn : ActivityScene()
     data object A11y : ActivityScene()
     data object TaskStack : ActivityScene()
+    data object RuleSummary : ActivityScene()
 }
 
 // 外部必须使用 synchronized(topActivityFlow) 来保证更新的原子性

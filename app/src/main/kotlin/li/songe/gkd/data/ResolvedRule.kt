@@ -25,8 +25,10 @@ sealed class ResolvedRule(
     private val preKeys = (rule.preKeys ?: emptyList()).toSet()
     val matches =
         (rule.matches ?: emptyList()).map { s -> group.cacheMap[s] ?: Selector.parse(s) }
-    val anyMatches =
-        (rule.anyMatches ?: emptyList()).map { s -> group.cacheMap[s] ?: Selector.parse(s) }
+    val anyMatches = RuleSelectorCompat.resolveAnyMatchSources(
+        appId = g.appId,
+        sources = rule.anyMatches ?: emptyList(),
+    ).map { s -> group.cacheMap[s] ?: Selector.parse(s) }
     val excludeMatches =
         (rule.excludeMatches ?: emptyList()).map { s -> group.cacheMap[s] ?: Selector.parse(s) }
     val excludeAllMatches =
@@ -44,11 +46,15 @@ sealed class ResolvedRule(
     val order = rule.order ?: group.order ?: 0
 
     private val actionCdKey = rule.actionCdKey ?: group.actionCdKey
-    private val actionCd = rule.actionCd ?: if (actionCdKey != null) {
-        group.rules.find { r -> r.key == actionCdKey }?.actionCd
-    } else {
-        null
-    } ?: group.actionCd ?: 1000L
+    private val actionCd = RuleSelectorCompat.resolveActionCd(
+        appId = g.appId,
+        sources = rule.anyMatches ?: emptyList(),
+        actionCd = rule.actionCd ?: if (actionCdKey != null) {
+            group.rules.find { r -> r.key == actionCdKey }?.actionCd
+        } else {
+            null
+        } ?: group.actionCd ?: 1000L,
+    )
 
     private val actionMaximumKey = rule.actionMaximumKey ?: group.actionMaximumKey
     private val actionMaximum = rule.actionMaximum ?: if (actionMaximumKey != null) {

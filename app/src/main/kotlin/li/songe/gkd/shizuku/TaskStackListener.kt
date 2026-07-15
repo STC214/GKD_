@@ -47,12 +47,13 @@ object FixedTaskStackListener : ITaskStackListener.Stub() {
     }
 
     override fun onTaskMovedToFront(taskId: Int) {
-        val taskInfo = shizukuContextFlow.value.getTasks().firstOrNull() ?: return
-        @Suppress("DEPRECATION")
-        if (taskInfo.id != taskId) {
+        val task = shizukuContextFlow.value.getForegroundTask() ?: return
+        if (task.taskId != taskId) {
             return
         }
-        onTaskMovedToFrontCompat(taskInfo.topActivity)
+        val appId = task.appId ?: return
+        val activityId = task.activityId ?: return
+        onTaskMovedToFrontCompat(ComponentName(appId, activityId))
     }
 
     override fun onTaskMovedToFront(taskInfo: ActivityManager.RunningTaskInfo) {

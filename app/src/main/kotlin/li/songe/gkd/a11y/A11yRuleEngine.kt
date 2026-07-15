@@ -214,7 +214,9 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         scope.launch(eventDispatcher) { consumeEvent(a11yEvent) }
     }
 
-    private val queryEvents = mutableListOf<A11yEvent>()
+    private val queryEvents = QueryEventBuffer<A11yEvent> { first, second ->
+        first.sameAs(second)
+    }
     private suspend fun consumeEvent(headEvent: A11yEvent) {
         val consumedEvents = synchronized(eventDeque) {
             if (eventDeque.firstOrNull() !== headEvent) return
@@ -325,7 +327,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             }
             return
         }
-        synchronized(queryEvents) { queryEvents.addAll(consumedEvents) }
+        queryEvents.addAll(consumedEvents)
         a11yContext.interruptKey++
         startQueryJob(byEvent = latestEvent, decisionId = decisionId)
     }
@@ -362,10 +364,8 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
     }
 
-    @Volatile
-    private var querying = false
+    private val queryWakeState = QueryWakeState<A11yEvent, ResolvedRule>()
 
-    @Synchronized
     private fun startQueryJob(
         byEvent: A11yEvent? = null,
         byForced: Boolean = false,
@@ -390,34 +390,53 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             )
             return
         }
-        if (querying) {
-            traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.QueryAlreadyRunning)
-            return
-        }
         // 无障碍从零启动时获取 safeActiveWindow 非常耗时
         if (byEvent == null && service.justStarted && !hasOthersService) {
             traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.ServiceStarting)
             return checkFutureStartJob()
         }
+        val request = QueryWakeRequest(
+            event = byEvent,
+            forced = byForced,
+            delayRule = byDelayRule,
+            correlationId = traceId,
+        )
+        if (!queryWakeState.request(request)) {
+            traceDecision(
+                traceId,
+                DecisionStage.Query,
+                DecisionOutcome.Observed,
+                DecisionReason.QueryDeferred,
+                detail = "event=${byEvent != null} forced=$byForced delayRule=${byDelayRule != null}",
+            )
+            return
+        }
+        launchQueryJob(request)
+    }
+
+    private fun launchQueryJob(request: QueryWakeRequest<A11yEvent, ResolvedRule>) {
+        val traceId = request.correlationId
         traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Observed, DecisionReason.QueryStarted)
         scope.launchTry(queryDispatcher) {
-            querying = true
             val st = if (META.debuggable) System.currentTimeMillis() else 0L
             try {
                 if (META.debuggable) {
                     Log.d(
                         "A11yRuleEngine",
-                        "startQueryJob start byEvent=${byEvent != null}, byForced=$byForced, byDelayRule=${byDelayRule != null}"
+                        "startQueryJob start byEvent=${request.event != null}, byForced=${request.forced}, byDelayRule=${request.delayRule != null}"
                     )
                 }
-                queryAction(traceId, byEvent, byForced, byDelayRule)
+                queryAction(traceId, request.event, request.forced, request.delayRule)
             } finally {
+                val pendingRequest = queryWakeState.complete()
                 checkFutureStartJob()
                 if (META.debuggable) {
                     val et = System.currentTimeMillis() - st
                     Log.d("A11yRuleEngine", "startQueryJob end $et ms")
                 }
-                querying = false
+                if (pendingRequest != null) {
+                    launchQueryJob(pendingRequest)
+                }
             }
         }
     }
@@ -463,38 +482,18 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         val newEvents = if (delayRule != null) {// 延迟规则不消耗事件
             null
         } else {
-            synchronized(queryEvents) {
-                if (byEvent != null && queryEvents.isEmpty()) {
-                    traceDecision(
-                        decisionId,
-                        DecisionStage.Event,
-                        DecisionOutcome.Skipped,
-                        DecisionReason.EventQueueEmpty,
-                    )
-                    return
-                }
-                (if (queryEvents.size > 1) {
-                    val hasDiffItem = queryEvents.any { e ->
-                        queryEvents.any { e2 -> !e.sameAs(e2) }
-                    }
-                    if (hasDiffItem) {
-                        // 存在不同的事件节点, 全部丢弃使用 root 查询
-                        null
-                    } else {
-                        // type,appId,className 一致, 需要在 synchronized 外验证是否是同一节点
-                        arrayOf(
-                            queryEvents[queryEvents.size - 2],
-                            queryEvents.last(),
-                        )
-                    }
-                } else if (queryEvents.size == 1) {
-                    arrayOf(queryEvents.last())
-                } else {
-                    null
-                }).apply {
-                    queryEvents.clear()
-                }
+            val eventBatch = queryEvents.drain()
+            if (byEvent != null && !eventBatch.hadEvents) {
+                traceDecision(
+                    decisionId,
+                    DecisionStage.Event,
+                    DecisionOutcome.Skipped,
+                    DecisionReason.EventQueueEmpty,
+                )
+                return
             }
+            // Mixed events deliberately fall back to a fresh root query.
+            eventBatch.events?.toTypedArray()
         }
         val activityRule = synchronized(topActivityFlow) { activityRuleFlow.value }
         activityRule.currentRules.forEach { rule ->
@@ -691,6 +690,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
 
         fun onScreenForcedActive() {
             instance?.onScreenForcedActive()
+        }
+
+        fun onRuleSummaryChanged() {
+            instance?.startQueryJob(byForced = true)
         }
 
         fun performActionBack(): Boolean {

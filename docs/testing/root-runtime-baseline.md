@@ -141,7 +141,7 @@ App 自带导入结果：
 
 至少锁定两个核心案例：
 
-- [ ] B01：规则应该执行但未执行，可稳定或统计性复现。
+- [x] B01：规则应该执行但未执行，可稳定或统计性复现。`2026-07-15` 米游社有效现场已留存完整诊断链和正负快照结构。
 - [ ] B02：动作实际未生效，但旧引擎将其计为成功，可稳定或统计性复现。
 
 ### 6.1 B01 候选证据：前台来源竞态
@@ -203,7 +203,73 @@ App 自带导入结果：
 
 有效复现条件：次日首次进入尚未签到的签到页，若页面停留且没有动作/Toast，立即保存 GKD 快照、Window/Task 状态、动作日志计数和时间戳。
 
-当前业务状态不具备再次签到条件，用户同意先跳过该现场并继续其他阶段 0 项目。B01 仍保持未验收；下次出现未签到页面时继续使用上述步骤，不因暂时跳过而把负样本记为通过。
+截至 `2026-07-14` 首次负样本，当时业务状态不具备再次签到条件，用户同意先跳过并继续其他阶段 0 项目；当时 B01 保持未验收。后续有效现场见下一节。
+
+### 6.2.1 米游社签到页：有效 B01 现场与选择器兼容修复
+
+`2026-07-15 08:34–08:36` 在同一设备上完成“已签到页面停留约 30 秒 → 切换未签到页面”的有效对照。订阅仍为 `667/v541`，目标组仍为 `app/8`，目标 Activity 仍为 `.web2.MiHoYoWebActivity`。
+
+结构化诊断在切换窗口内记录 1654 条米游社相关记录、151 个关联 ID。主要终止原因如下：
+
+| 原因 | 数量 | 含义 |
+| --- | ---: | --- |
+| `MatchTimeout` | 576 | 其他规则超过匹配窗口 |
+| `PrerequisiteUnsatisfied` | 398 | 规则 1–3 因规则 0 未触发而停止 |
+| `RuleEligible` / `WindowRootAvailable` / `SelectorMiss` | 各 155 | 规则可执行且窗口 root 存在，但选择器未命中 |
+| `QueryStarted` | 144 | 查询实际持续运行 |
+| `QueryAlreadyRunning` | 7 | 页面切换期间的少量合并噪声 |
+| `StaleContext` | 2 | 页面切换瞬间的旧上下文 |
+
+关键链路反复稳定出现：
+
+```text
+667/app/8/0 RuleEligible
+667/app/8/0 WindowRootAvailable
+667/app/8/0 SelectorMiss
+667/app/8/1..3 PrerequisiteUnsatisfied
+```
+
+没有任何 `ActionSubmitted`。因此本次故障发生在选择器层，Root、动作执行器和查询唤醒均未进入失败路径；少量 `QueryAlreadyRunning` 不是本次漏执行主因。
+
+同一时段保存的已签到和未签到快照均为 74 个节点。两者的 WebView 自身 `text` 均为空，而规则 0 的两条入口分别依赖：
+
+```text
+WebView[text*="签到"] >4 View[childCount=11] ...
+WebView[text*="签到"] >4 View[childCount=10] ...
+```
+
+当前未签到页的真实目标路径仍为 `WebView >4 View[childCount=11] > View[childCount=3] > Image[index=0]`；已签到页同位置奖励图标为 `index=2`。首版兜底只保留结构条件，审查发现 `.MiHoYoWebActivity` 还是其他米游社网页共用的通用容器，存在误触风险，因此最终兼容选择器先从标题节点确认同一 WebView 内存在可见的“每日签到”页面，再沿原结构定位目标：
+
+```text
+[text$="每日签到"][visibleToUser=true] <<n WebView >4 View[childCount=11] > @View[childCount=3][visibleToUser=true] > Image[index=0][text!=null]
+```
+
+实现不修改设备上的 `667.json`，而由 `RuleSelectorCompat` 仅在 `com.mihoyo.hyperion` 且规则仍包含已确认失效的完整旧选择器时追加兜底。官方订阅删除旧选择器后兼容逻辑自动停用；官方直接加入同一兜底时不会重复添加。缩减节点树回归使用现场相同的标题、四层 WebView 路径、奖励容器和图片 index：未签到页命中目标 View，已签到页因 `index=2` 不命中，普通“参量质变仪提醒”网页因没有“每日签到”标题不命中。
+
+该轮兼容测试增加到 7 项，App 单元测试总数为 24；Selector JVM 基线仍为 18，Release 与 Vital Lint 通过。当时因签到 WebActivity 已退出，真实点击尚未验收；后续有效现场如下。
+
+#### 6.2.1.1 星穹铁道未签到页端到端验收
+
+`2026-07-15 09:21–09:49` 在用户保持打开的“《崩坏：星穹铁道》签到福利”页面完成第二次有效现场。订阅已经在线更新为 `667/v542`，原订阅 JSON 未被改写。安装前快照 `1784078848053` 和最终修复前快照均为 50 个节点：奖励容器为 `View[childCount=10]`，其前三个子节点依次为资料块 `View[childCount=6]`、第 13 天已签到块 `View[childCount=3]`、第 14 天未签到扁平 `TextView("×5000第14天")`。
+
+现场证明该 WebView 的文本虽然可被快照导出，但活动自动化查询中的所有文本选择器均返回未命中；原先使用“签到福利”标题的缩减树测试因此属于假阳性。最终星铁兜底改为应用包名和旧选择器双重门控下的结构签名：
+
+```text
+WebView >4 View[childCount=10]
+  > View[childCount=6]
+  + View[childCount=3]
+  + TextView[childCount=0][visibleToUser=true]
+```
+
+该选择器经 `/api/execSelector` 在当前真机页面返回匹配；普通 `childCount=10` WebView 的负例因缺少 `6 + 3 + TextView` 前缀而不匹配。
+
+同一现场还暴露启动竞态：自动化服务先连接，而 `ruleSummaryFlow` 稍后才完成应用规则构建；首次查询只加载全局规则，规则汇总变化后原代码既不刷新 `activityRuleFlow` 也不补查，静止页面会一直等待下一次有效事件。新增 `ActivityScene.RuleSummary` 和 `initRuleSummaryRefresh()` 后，规则汇总变化会原子刷新当前 Activity 规则，并由现有引擎执行一次 forced query。
+
+修复版在 `09:43:59.360` 命中 `667/app/8/0`，目标为第 14 天 `TextView`，Root `clickCenter` 返回 `shell=true`、`state=Completed`；随后规则 1 关闭签到成功弹窗。最终快照 `1784079885535` 显示累计签到由 13 天变为 14 天，第 14 天节点由扁平 `TextView` 变为含文本和图片的 `View[childCount=3]`，构成端到端成功证据。
+
+页面响应前曾按默认 1 秒冷却重复提交两次相同点击。兼容层现仅对米游社且仍包含星铁完整旧选择器的规则，把最短动作冷却提高到 5 秒；上游若配置更长冷却则保持上游值。最终已签到页覆盖安装前后动作计数均为 `7721`，未发生误点。
+
+该次现场结束时 App 测试 29/29、Selector JVM 18/18、Release 与 Vital Lint 全部通过；后续阶段 3 构建与安装结果见 6.4。
 
 ### 6.3 哔哩哔哩冷启动：规则链成功样本
 
@@ -219,6 +285,26 @@ App 自带导入结果：
 第二步依赖 `preKeys=[0,1]`，能够紧随第一步命中，说明本次规则链实际推进，登记为哔哩哔哩成功对照样本，不计为 B01/B02。需要保留的观察点是：第一步动作日志中的节点为 `visibleToUser=false`，纵坐标超出当前屏幕且高度为负；这可能来自 RecyclerView 节点复用或快照/动作并发。现有 `performAction=true` 只能证明系统接受调用，后续阶段仍需通过动作后界面验证确认真实效果。
 
 证据位于忽略目录 `local-assets/diagnostics/root-runtime/bili-20260714_123300/`，包含完整 GKD 当日日志、快照 JSON、最小 JSON、PNG 和原始归档。
+
+### 6.4 阶段 3 查询唤醒状态机验收
+
+旧实现的 `startQueryJob()` 在 `querying=true` 时以 `QueryAlreadyRunning` 直接返回，查询窗口内到达的新事件可能没有后续查询；`queryEvents` 还会随同类事件持续追加。新实现引入 `QueryWakeState`：只允许一个 runner，并把运行期间的请求合并为一个有界 pending；当前查询结束时仍持有所有权并直接 handoff，避免“先置空闲、后启动”之间再次丢事件。被合并请求记录为 `QueryDeferred`。
+
+节点事件由 `QueryEventBuffer` 约束：连续同类事件最多保留最后两个；混合事件只留下重新读取当前 root 的标志。这样既保留既有增量查询语义，又保证事件风暴下内存为常量级。
+
+新增 10 项单元测试覆盖单 runner、64 路并发请求、1000 次请求风暴、10000 次同类事件风暴、无空隙 handoff、forced/normal/delay 合并优先级、混合事件降级和空缓冲区分。全量结果为 App 39/39、Selector JVM 18/18、Release 构建与 Vital Lint 全部通过。
+
+最终 APK 为 `1.12.1-f2e60bd-dirty`，路径 `app/build/outputs/apk/gkd/release/app-gkd-release.apk`，SHA-256 `ACFBF7FA16C04675F1C3EF852AC24204E704D32D724CEE9BE5CF14E63E93E171`，3,320,191 字节。非清数据覆盖安装后主进程 PID `17570`，Root UserService PID `17725`、UID 0，StatusService 为前台。
+
+真机冒烟在米游社星铁已签到页执行 12 次交替横向滑动以制造窗口内容事件。测试前后前台均为 `com.mihoyo.hyperion/.web2.MiHoYoWebActivity`，动作计数均为 `7721`，两个进程保持存活且没有新增 GKD `AndroidRuntime`。忽略目录证据为 `local-assets/diagnostics/root-runtime/gkd-20260715-phase3-smoke.log`。后续遇到天然慢选择器页面时可继续积累真实 `QueryDeferred` 诊断样本，但不作为阶段 3 状态机收口的阻塞项。
+
+### 6.5 阶段 4 第一批任务/窗口采样验收
+
+任务源由单条 `getTasks(1).firstOrNull()` 改为最多 16 条候选，按平台可用性读取 `taskId/userId/effectiveUid/displayId/isFocused/isVisible/isRunning`，并优先选择目标显示屏上 focused、visible、running 的任务。AOSP 历史源码复核后已为字段加版本门控：Android 10/11 不访问 Android 12 才加入的 focused/visible，Android 12～15 不访问 Android 16 才加入的 effectiveUid。焦点窗口采样记录 windowId、displayId、类型、层级、focused/active 和 root 包名；Task 与 focused root 包一致才产生可执行的 `Confirmed` 快照，冲突快照默认 `canExecute=false`。
+
+新增 `ForegroundTaskTest` 6 项和 `ForegroundSnapshotTest` 8 项。全量结果为 App 53/53、Selector JVM 18/18、Release 与 Vital Lint 通过。APK 路径 `app/build/outputs/apk/gkd/release/app-gkd-release.apk`，SHA-256 `8812A0E6AC2C977B2081548FCDB054AF23658FDFD9407D6C364B2BCA3E69A546`，3,320,191 字节。
+
+APK 非清数据覆盖安装到 Android 16 测试机后，主进程 PID `1809`，Root UserService PID `1872`、UID 0。先启动 GKD 主界面，再把已有米游社任务带回前台，TaskStack 路径完成两次切换；没有 `NoSuchFieldError`、`NoSuchMethodError` 或 GKD `AndroidRuntime`。本批模型尚未接管规则上下文，下一次验收需覆盖输入法/SystemUI/权限弹窗/画中画策略和冲突延迟确认。
 
 ## 7. 固定窗口场景
 
@@ -312,7 +398,7 @@ App 自带导入结果：
 - [x] App 自带备份已导出、拉取、计算 SHA-256 并验证 ZIP 内容完整。
 - [x] 真实配置和订阅已通过 App 自带导出/导入验证可恢复；另有 Root 原始快照兜底。
 - [ ] 至少 10 条真实规则完成基线统计。
-- [ ] B01“规则未执行”已复现并留存证据。
+- [x] B01“规则未执行”已复现并留存证据，见 6.2.1。
 - [ ] B02“动作未生效但计为成功”已复现并留存证据。
 - [ ] 固定窗口场景已完成基线记录。
 - [ ] 订阅兼容冒烟测试已完成。
@@ -321,7 +407,7 @@ App 自带导入结果：
 
 当前结论：阶段 0 **进行中**，阶段 0.5 Root 桥已完成实现和真机验收。真机确认系统 Binder `8/8`、Root UserService UID `0`、UiAutomation 在线，手动重新检测不改变相关进程 PID；配置与 3 个订阅文件哈希保持基线一致。另修复了通知权限被拒绝时外部 `ExposeService` 跳过 `startForeground()` 的冷启动崩溃，并在同一设备上按“覆盖安装 → 强停 → ADB 拉起”路径复测通过。
 
-普通全屏、通知栏、输入法、自由窗、旋转和锁屏/解锁已有真机证据；权限弹窗、真实分屏、画中画、双开、10 条规则重复统计和 B01/B02 仍未完成。米游社 B01 因当前已签到暂时跳过；仍不授权进入会改变规则执行逻辑的阶段。
+截至 `2026-07-14` 当轮，普通全屏、通知栏、输入法、自由窗、旋转和锁屏/解锁已有真机证据；权限弹窗、真实分屏、画中画、双开、10 条规则重复统计和 B01/B02 尚未完成。当时米游社 B01 因已签到暂时跳过；其后 `2026-07-15` 的有效现场和兼容修复见 6.2.1。
 
 ## 11. 阶段 1 结构化决策诊断真机记录
 
@@ -334,7 +420,7 @@ App 自带导入结果：
 - 首版 512 条容量在哔哩哔哩高频事件下约十秒填满；最终 2048 条 APK 已原地升级并完成同场景复测，仅使用 91/2048 条，没有发生环形淘汰。
 - GKD 自身零规则现在记录为 `NoApplicableRules/Observed`，不再覆盖目标应用最近失败。最终最近失败显示“包名或 Activity 不匹配”，应用为 `com.miui.securitycenter`，详情为 `foreground=tv.danmaku.bili`，与应用启动过渡现场相符。
 - 最终 App Debug 单元测试 8/8、Release 构建、Root UserService UID 0、StatusService 前台状态和零新增崩溃均通过；3 个订阅文件 SHA-256 保持阶段 0 基线值。
-- 本阶段没有修改 `rule.trigger()`、规则状态计算、选择器、动作实现、延迟或查询唤醒算法；B01/B02 仍需有效现场才能验收“每次漏执行均有准确终止原因”。
+- 本阶段当时没有修改 `rule.trigger()`、规则状态计算、选择器、动作实现、延迟或查询唤醒算法；后续 B01 有效现场已于 6.2.1 完成诊断验收并单独加入窄范围兼容层。
 
 ## 12. 代码审查修复与待回归项
 
