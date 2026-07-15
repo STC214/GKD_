@@ -21,6 +21,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import li.songe.gkd.META
 import li.songe.gkd.data.ActionPerformer
+import li.songe.gkd.data.ActionExecutionContext
+import li.songe.gkd.data.ActionExecutionGuard
 import li.songe.gkd.data.ActionResult
 import li.songe.gkd.data.ActionResultState
 import li.songe.gkd.data.AppRule
@@ -933,7 +935,18 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 return
             }
             traceDecision(decisionId, DecisionStage.Action, DecisionOutcome.Submitted, DecisionReason.ActionSubmitted, rule)
-            val actionResult = rule.performAction(target)
+            val actionContext = ActionExecutionContext.fromNode(target, windowContextToken)
+            val actionResult = rule.performAction(
+                node = target,
+                context = actionContext,
+                guard = ActionExecutionGuard {
+                    val latestForeground = getConfirmedForeground(decisionId)
+                    latestForeground != null &&
+                            windowGenerationState.isCurrent(windowContextToken, latestForeground) &&
+                            nodeMatchesWindow(target, windowContextToken) &&
+                            refreshNode(target)
+                },
+            )
             if (actionResult.result) {
                 advanceWindowGeneration()
                 markWindowTransition()
@@ -943,7 +956,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     DecisionOutcome.Succeeded,
                     DecisionReason.ActionSucceeded,
                     rule,
-                    "action=${actionResult.action}, state=${actionResult.state}",
+                    "action=${actionResult.action}, state=${actionResult.state}, target=${actionResult.target}, backend=${actionResult.backend}, display=${actionResult.displayId}, window=${actionResult.windowId}, rotation=${actionResult.rotation}, windowBounds=${actionResult.windowBounds}, visibleBounds=${actionResult.visibleBounds}, retries=${actionResult.retryCount}",
                 )
                 val topActivity = topActivityFlow.value
                 rule.trigger()
@@ -961,13 +974,15 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     DecisionStage.Action,
                     DecisionOutcome.Failed,
                     when (actionResult.state) {
+                        ActionResultState.StaleContext -> DecisionReason.StaleContext
+
                         ActionResultState.Cancelled,
                         ActionResultState.TimedOut -> DecisionReason.ActionCancelled
 
                         else -> DecisionReason.ActionRejected
                     },
                     rule,
-                    "action=${actionResult.action}, state=${actionResult.state}",
+                    "action=${actionResult.action}, state=${actionResult.state}, target=${actionResult.target}, backend=${actionResult.backend}, display=${actionResult.displayId}, window=${actionResult.windowId}, rotation=${actionResult.rotation}, windowBounds=${actionResult.windowBounds}, visibleBounds=${actionResult.visibleBounds}, retries=${actionResult.retryCount}",
                 )
             }
         }
@@ -1026,9 +1041,13 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 a, selector, MatchOption(fastQuery = gkdAction.fastQuery)
             ) ?: throw RpcError("没有查询到节点")
             return withContext(Dispatchers.IO) {
-                ActionPerformer
-                    .getAction(gkdAction.action ?: ActionPerformer.None.action)
-                    .perform(targetNode, gkdAction)
+                li.songe.gkd.data.ActionExecutor.execute(
+                    performer = ActionPerformer.getAction(
+                        gkdAction.action ?: ActionPerformer.None.action
+                    ),
+                    node = targetNode,
+                    locationProps = gkdAction,
+                )
             }
         }
 

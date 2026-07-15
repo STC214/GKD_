@@ -34,10 +34,20 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
         private const val SWIPE_EVENT_HZ_DEFAULT = 120
     }
 
-    fun runTap(x: Float, y: Float): Boolean =
-        sendTap(InputDevice.SOURCE_TOUCHSCREEN, x, y, Display.INVALID_DISPLAY)
+    fun runTap(
+        x: Float,
+        y: Float,
+        displayId: Int = Display.DEFAULT_DISPLAY,
+    ): Boolean = sendTap(InputDevice.SOURCE_TOUCHSCREEN, x, y, displayId)
 
-    fun runSwipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long): Boolean {
+    fun runSwipe(
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        duration: Long,
+        displayId: Int = Display.DEFAULT_DISPLAY,
+    ): Boolean {
         return sendSwipe(
             InputDevice.SOURCE_TOUCHSCREEN,
             x1,
@@ -45,7 +55,7 @@ class InputShellCommand(val safeInputManager: SafeInputManager) {
             x2,
             y2,
             duration,
-            Display.INVALID_DISPLAY,
+            displayId,
             false,
         )
     }

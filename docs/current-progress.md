@@ -6,7 +6,7 @@
 
 项目已经完成 Root 桥真实性与自恢复、结构化规则诊断，以及动作结果可信化改造。米游社星穹铁道未签到页已完成端到端验收：修复第三方旧选择器、规则汇总晚于自动化连接时不补查的启动竞态，并为慢响应页面增加窄范围防重复冷却。所有兼容均不改写订阅文件。当前安装在测试手机上的 GKD 仍以普通 App 身份保留原版订阅、数据库和备份能力，同时通过 UID 0 的 Root UserService 执行特权操作。
 
-阶段 3“查询唤醒状态机”和阶段 4“前台与焦点窗口融合”均已完成，阶段 5 代码任务完成并进入专项真机验收。窗口切换期 root 缺失在普通前台确认之前进入 50/100/200/400/800ms 共享总预算；State 与 display/rotation 驱动结构 generation，Content 采用分支失效，节点缓存使用单调短时效，旧选择结果动作门控和节点 refresh/同窗口重新定位已经形成闭环。
+阶段 3“查询唤醒状态机”、阶段 4“前台与焦点窗口融合”和阶段 5“窗口与节点恢复”均已完成。窗口切换期 root 缺失在普通前台确认之前进入 50/100/200/400/800ms 共享总预算；State 与 display/rotation 驱动结构 generation，Content 采用分支失效，节点缓存使用单调短时效，旧选择结果动作门控和节点 refresh/同窗口重新定位已经形成闭环。Android 16 真机冷启动采样已自然命中一次缺 root：首次恢复在 `attempt=1/5`、50ms 调度；约 10ms 后更新的米游社 task/window 已取得 root，旧恢复被新事件自然取代，未出现恢复耗尽。
 
 ## 阶段状态
 
@@ -18,8 +18,9 @@
 | 2. 动作结果误判修复 | 已完成 | Root 输入逐事件返回真实结果，无障碍手势区分完成/取消/拒绝/超时；失败不消耗规则次数或冷却。 |
 | 3. 查询唤醒状态机 | 已完成 | 单 runner、有界 pending、最新事件补查、常量空间事件缓冲和规则晚加载补查均已实现并验证。 |
 | 4. 前台与焦点窗口融合 | 已完成 | 覆盖层分类、150ms 有界确认、规则查询/动作前门控和结构化诊断已接入；普通应用、SystemUI、输入法、权限弹窗、真实画中画均已真机验收。 |
-| 5. 窗口与节点恢复 | 进行中 | 代码任务完成；审查确认的恢复不可达、Content 全局换代、预算重置和缓存时效问题均已修复，等待可控 root 缺失与慢页面专项真机验收。 |
-| 6～9 | 未开始 | 按主计划依次处理动作增强、内置 RootService、多用户和稳定性收口。 |
+| 5. 窗口与节点恢复 | 已完成 | 审查确认的恢复不可达、Content 全局换代、预算重置和缓存时效问题均已修复；米游社/B 站专项采样命中真实缺 root 恢复，未见孤儿事件链、恢复耗尽或崩溃。 |
+| 6. 动作执行器 | 进行中 | 第一批统一执行上下文、display/window/rotation/区域门控、后端回退复核、最近可点击父节点和结构化结果已接入；动作后验证待实现。 |
+| 7～9 | 未开始 | 按主计划依次处理内置 RootService、多用户和稳定性收口。 |
 
 阶段 0 尚未关闭的是规则重复统计、B02 和部分依赖真实 App 时机的窗口样本；这些长期采样不阻止已经具备独立测试证据的可靠性修复继续推进。米游社 B01 已补入基线和诊断文档。
 
@@ -54,21 +55,27 @@
 - focused Application Window 已存在但 root 暂空时，可在不放宽动作门控的前提下于普通确认前进入有限恢复。
 - Content 事件不推进全局 generation，动态 WebView 不会仅因持续内容更新而饿死动作；State 和 display/rotation 变化仍使旧结果失效。
 - 节点默认缓存时效缩短为文本 500ms、结构 1000ms并使用单调时钟，保留原时效 Legacy 策略。
+- 阶段 5 最终诊断缓存为 2048 条、95 个事件型关联 ID，事件链孤儿数为 0；其中米游社 62 条、哔哩哔哩 45 条（应用切换使目标集合可重叠），14 个合并事件链均保留后续决策。
+- 五次米游社冷启动中自然命中一次 `WindowRootUnavailable → WindowRootRecoveryPending(attempt=1/5, delay=50)`；随后约 10ms 更新后的 task/window 出现 `WindowRootAvailable`，旧恢复被新事件取代，没有 `WindowRootRecoveryExhausted`。
+- 统一 `ActionExecutor` 在规则语义与具体动作后端之间接管提交策略；结果携带 target、backend、displayId、windowId、rotation、windowBounds、visibleBounds 和 retryCount。
+- Root 坐标输入显式指定 displayId；Root 失败转无障碍手势前再次通过同一窗口 guard，非默认显示屏没有对应手势能力时直接拒绝。
+- 节点 API 明确拒绝时最多尝试最近一个可见且可点击的父节点；已接受/已完成动作、更多祖先及 back/swipe 等未知副作用动作不自动重复。
 
 ## 当前构建和真机状态
 
-- 当前 Git HEAD：`3bca44d7`；阶段 4 及最终审查收口已提交，本轮阶段 5 第一批代码、测试和文档仍在工作区，尚未提交。
+- 当前 Git HEAD：`f5c03f8f`；阶段 5 代码、测试和首轮文档已于 2026-07-15 13:02 提交，阶段 5 最终验收文档及阶段 6 第一批代码/文档仍在工作区。
 - Release APK：`app/build/outputs/apk/gkd/release/app-gkd-release.apk`
-- 当前本地 APK SHA-256：`1151E53FA7DCAD8F4B8212D2D04F0C81663F133EFCF52609C00DCE23C68C620D`
-- APK 大小：3,320,183 字节。
-- App Debug 单元测试：88/88；阶段 5 新增 16 项覆盖恢复、共享预算、缺 root 边界、State/Content 策略、rotation 和缓存策略。
+- 当前本地 APK SHA-256：`1817E1F99DFCAFEC6CA5D001A3A9F9661DCC382FCC89519254C49AD8B5200848`
+- APK 大小：3,336,575 字节。
+- App Debug 单元测试：91/91；阶段 6 第一批新增 3 项区域边界、交集和双区域门控测试。
 - Selector JVM 测试：18/18。
 - Release 构建与 `lintVital`：通过。
 - 测试设备：Xiaomi Android 16，KernelSU + Sui。
 - 最终 Root UserService：UID 0；两个临时探针 App、HTTP 临时服务和 ADB 端口转发均已清除。
-- 当前本地 Release 已非清数据覆盖安装到测试手机；版本 `1.12.1-3bca44d-dirty`，主进程 PID `24515`，Root UserService PID `18339`、UID 0。StatusService 保持前台；root 执行 6 次米游社主页横向往返滑动后进程稳定，无新增 GKD 崩溃。
+- 当前本地 Release 已非清数据覆盖安装到测试手机；版本 `1.12.1-f5c03f8-dirty`，主进程 PID `12288`，Root UserService PID `29736`、UID 0。StatusService 保持前台；米游社/B 站启动、切换和动态页面滚动后进程稳定，无新增 GKD 崩溃。
 - 手机重启后 KernelSU `u:r:ksu:s0` 被 SELinux 拒绝直接读取 App 私有目录，因此本轮没有重复声称文件哈希一致；非清数据证据来自 App 自身成功加载原订阅与动作计数。
 - 最终检查无新增 GKD `AndroidRuntime` 崩溃。
+- 阶段 5 专项采样结束时主进程仍为 PID `24515`，Root UserService PID `18339`、UID 0，StatusService 为前台；诊断开关原本开启且测试后保持开启。
 
 ## 当前工作区主要改动
 
@@ -78,6 +85,7 @@
 - 前台融合：`TaskInfoHidden.java`、`WindowConfiguration.java` 补齐任务和画中画字段；`ForegroundTask.kt`、`ForegroundSnapshot.kt`、`ForegroundSnapshotProvider.kt` 建立多任务、窗口和覆盖层采样；`ForegroundConfirmationState.kt` 提供 150ms 有界确认；`A11yRuleEngine.kt` 统一查询和动作门控。
 - 窗口恢复：新增 `WindowRootRecoveryState.kt`、`WindowGenerationState.kt`；阶段 5 累计 16 项测试，`A11yContext.kt` 按 generation 清缓存，`A11yRuleEngine.kt` 接入五级退避、旧代门控和节点重新定位。
 - 阶段 5 审查修复：`ForegroundSnapshot.canRecoverMissingRoot` 将主要 root 挂载竞态接入有限恢复；`NodeCachePolicy.kt` 提供 Default/Legacy 策略；Content/State generation 分流，rotation 进入快照令牌。
+- 阶段 6 第一批：新增 `ActionExecutor.kt` 和 `ActionExecutionContextTest.kt`；`GkdAction.kt` 统一动作上下文/结果，`ResolvedRule.kt` 和 `A11yRuleEngine.kt` 接入执行 guard，Root 输入链显式传递 displayId。
 - 构建追溯：`app/build.gradle.kts` 为未提交工作区版本追加 `-dirty`。
 - 动作结果链路：`GkdAction.kt`、`A11yService.kt`、`InputManager.kt`、`InputShellCommand.kt`、`ShizukuApi.kt`、`A11yRuleEngine.kt`。
 - 输入与 Binder 回归：`InputSequenceResult.kt`、`InputSequenceResultTest.kt`、`SafeInvokeShizukuTest.kt`。
@@ -87,19 +95,19 @@
 
 ## 本轮开发停点
 
-- 最后完成项：阶段 5 代码审查修复。两个 P1 和缓存/预算/rotation 收口均已完成；App 88/88、Selector 18/18、Release、Vital Lint 和米游社动态页面进程冒烟通过。
+- 最后完成项：阶段 6 第一批统一动作执行器。App 91/91、Selector 18/18、Release、Vital Lint 和 Android 16 非清数据覆盖安装冒烟通过。
 - 首次标题锚点方案被真机探针否定：快照中的 WebView 文本不可供活动选择器查询；文档和测试现以真实 50 节点拓扑为准，不再保留该假设。
 - 下次继续时不需要重复阶段 2 的手势取消、动作计数恢复和订阅哈希验收；只有 APK、签名、规则格式或相关执行链再次变化时才重跑对应基线。
-- 恢复入口：继续阶段 5 真机验收，先做可控 root 暂空故障注入，再进行米游社签到 WebView和哔哩哔哩视频页专项统计。
-- 工作区尚未提交；脏工作区 APK 版本为 `1.12.1-3bca44d-dirty`。继续开发前保留本轮两个状态机、`A11yContext`/`A11yRuleEngine` 接入、对应测试和文档改动。
+- 恢复入口：继续阶段 6 动作后验证，先定义不新增订阅字段的默认可验证信号，再接入 `Verified`/`ActionVerificationFailed`，最后做安全重试审查。
+- 当前 APK 为工作区构建 `1.12.1-f5c03f8-dirty`；阶段 6 第一批代码和阶段 5 最终验收文档均尚未提交。
 
 ## 下一步
 
-继续阶段 5，按以下顺序实施：
+进入阶段 6，按以下顺序实施：
 
-1. 对 root 恢复做可控故障注入，确认主要挂载竞态确实依次消费共享预算并按时停止。
-2. 在米游社签到 WebView 和哔哩哔哩视频页进行专项回归，对比命中率、恢复次数、`StaleContext` 和误动作。
-3. 复测旋转、权限弹窗、输入法和 PiP，确认新 rotation/Content 策略不回退阶段 4 安全边界。
-4. 完成阶段 5 最终审查和真机证据后进入阶段 6 动作执行器。
+1. 定义无需改变现有订阅格式的默认动作后验证信号和超时边界。
+2. 将节点消失、窗口/generation 变化等可验证结果映射为 `Verified`，验证失败记录 `ActionVerificationFailed`。
+3. 保证仅“动作已完成但验证未通过”的安全策略可进入一次受控复查，不重复发送未知副作用输入。
+4. 补齐验证状态机测试并进行米游社/B 站真实动作回归。
 
 详细实施顺序见 [`root-runtime-refactor-plan.md`](root-runtime-refactor-plan.md)，代码级迁移方法见 [`upstream-code-delta-guide.md`](upstream-code-delta-guide.md)，真机证据见 [`testing/root-runtime-baseline.md`](testing/root-runtime-baseline.md)。

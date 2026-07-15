@@ -148,17 +148,32 @@ class ShizukuContext(
     }
 
     @WorkerThread
-    fun tap(x: Float, y: Float, duration: Long = 0): Boolean {
-        return serviceWrapper?.tap(x, y, duration) ?: inputManager?.tap(x, y, duration) ?: false
+    fun tap(
+        x: Float,
+        y: Float,
+        duration: Long = 0,
+        displayId: Int = Display.DEFAULT_DISPLAY,
+    ): Boolean {
+        return serviceWrapper?.tap(x, y, duration, displayId)
+            ?: inputManager?.tap(x, y, duration, displayId)
+            ?: false
     }
 
-    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long): Boolean {
-        return serviceWrapper?.swipe(x1, y1, x2, y2, duration) ?: inputManager?.swipe(
+    fun swipe(
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        duration: Long,
+        displayId: Int = Display.DEFAULT_DISPLAY,
+    ): Boolean {
+        return serviceWrapper?.swipe(x1, y1, x2, y2, duration, displayId) ?: inputManager?.swipe(
             x1,
             y1,
             x2,
             y2,
-            duration
+            duration,
+            displayId,
         ) ?: false
     }
 

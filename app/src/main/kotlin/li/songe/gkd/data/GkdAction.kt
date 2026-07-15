@@ -34,7 +34,35 @@ data class ActionResult(
     } else {
         ActionResultState.Rejected
     },
+    val target: ActionTarget = ActionTarget.Unknown,
+    val backend: ActionBackend = ActionBackend.Unknown,
+    val displayId: Int? = null,
+    val windowId: Int? = null,
+    val rotation: Int? = null,
+    val windowBounds: ActionBounds? = null,
+    val visibleBounds: ActionBounds? = null,
+    val retryCount: Int = 0,
 )
+
+@Serializable
+enum class ActionTarget {
+    Unknown,
+    Node,
+    ClickableParent,
+    Coordinates,
+    Global,
+    None,
+}
+
+@Serializable
+enum class ActionBackend {
+    Unknown,
+    Node,
+    Root,
+    Accessibility,
+    Global,
+    None,
+}
 
 @Serializable
 enum class ActionResultState {
@@ -50,6 +78,7 @@ enum class ActionResultState {
     Cancelled,
     Rejected,
     TimedOut,
+    StaleContext,
 }
 
 private fun GestureDispatchResult.toActionResultState() = when (this) {
@@ -66,7 +95,8 @@ private fun ActionResultState.isSuccessful() = when (this) {
 
     ActionResultState.Cancelled,
     ActionResultState.Rejected,
-    ActionResultState.TimedOut -> false
+    ActionResultState.TimedOut,
+    ActionResultState.StaleContext -> false
 }
 
 private suspend fun dispatchGesture(
@@ -81,17 +111,26 @@ sealed class ActionPerformer(val action: String) {
     abstract suspend fun perform(
         node: AccessibilityNodeInfo,
         locationProps: RawSubscription.LocationProps,
+        context: ActionExecutionContext = ActionExecutionContext.fromNode(node),
+        guard: ActionExecutionGuard = ActionExecutionGuard { true },
     ): ActionResult
 
     data object ClickNode : ActionPerformer("clickNode") {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
             TrackService.addA11yNodePosition(node)
             return ActionResult(
                 action = action,
-                result = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                result = node.performAction(AccessibilityNodeInfo.ACTION_CLICK),
+                target = ActionTarget.Node,
+                backend = ActionBackend.Node,
+                displayId = context.displayId,
+                windowId = context.windowId,
+                rotation = context.rotation,
             )
         }
     }
@@ -100,26 +139,50 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
             val rect = node.casted.boundsInScreen
             val p = locationProps.position?.calc(rect)
             val x = p?.first ?: ((rect.right + rect.left) / 2f)
             val y = p?.second ?: ((rect.bottom + rect.top) / 2f)
-            if (!ScreenUtils.inScreen(x, y)) {
+            if (!ScreenUtils.inScreen(x, y) || !context.allowsPoint(x, y)) {
                 return ActionResult(
                     action = action,
                     result = false,
                     position = x to y,
+                    target = ActionTarget.Coordinates,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
                 )
             }
             TrackService.addXyPosition(x, y)
-            if (shizukuContextFlow.value.tap(x, y)) {
+            if (shizukuContextFlow.value.tap(x, y, displayId = context.displayId)) {
                 return ActionResult(
                     action = action,
                     result = true,
                     shell = true,
                     position = x to y,
                     state = ActionResultState.Completed,
+                    target = ActionTarget.Coordinates,
+                    backend = ActionBackend.Root,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
+                )
+            }
+            if (!guard.isCurrent()) return ActionExecutor.staleResult(this, context)
+            if (!context.supportsAccessibilityGesture) {
+                return ActionResult(
+                    action = action,
+                    result = false,
+                    position = x to y,
+                    target = ActionTarget.Coordinates,
+                    backend = ActionBackend.Accessibility,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
                 )
             }
             val path = Path().apply { moveTo(x, y) }
@@ -139,6 +202,11 @@ sealed class ActionPerformer(val action: String) {
                 result = state.isSuccessful(),
                 position = x to y,
                 state = state,
+                target = ActionTarget.Coordinates,
+                backend = ActionBackend.Accessibility,
+                displayId = context.displayId,
+                windowId = context.windowId,
+                rotation = context.rotation,
             )
         }
     }
@@ -147,14 +215,10 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
-            if (node.isClickable) {
-                val result = ClickNode.perform(node, locationProps)
-                if (result.result) {
-                    return result
-                }
-            }
-            return ClickCenter.perform(node, locationProps)
+            return ActionExecutor.execute(this, node, locationProps, context, guard)
         }
     }
 
@@ -162,6 +226,8 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
             TrackService.addA11yNodePosition(node)
             return ActionResult(
@@ -170,7 +236,12 @@ sealed class ActionPerformer(val action: String) {
                     if (this) {
                         delay(LongClickCenter.LONG_DURATION)
                     }
-                }
+                },
+                target = ActionTarget.Node,
+                backend = ActionBackend.Node,
+                displayId = context.displayId,
+                windowId = context.windowId,
+                rotation = context.rotation,
             )
         }
     }
@@ -180,27 +251,57 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
             val rect = node.casted.boundsInScreen
             val p = locationProps.position?.calc(rect)
             val x = p?.first ?: ((rect.right + rect.left) / 2f)
             val y = p?.second ?: ((rect.bottom + rect.top) / 2f)
             // 某些系统的 ViewConfiguration.getLongPressTimeout() 返回 300 , 这将导致触发普通的 click 事件
-            if (!ScreenUtils.inScreen(x, y)) {
+            if (!ScreenUtils.inScreen(x, y) || !context.allowsPoint(x, y)) {
                 return ActionResult(
                     action = action,
                     result = false,
                     position = x to y,
+                    target = ActionTarget.Coordinates,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
                 )
             }
             TrackService.addXyPosition(x, y)
-            if (shizukuContextFlow.value.tap(x, y, LONG_DURATION)) {
+            if (shizukuContextFlow.value.tap(
+                    x,
+                    y,
+                    LONG_DURATION,
+                    context.displayId,
+                )
+            ) {
                 return ActionResult(
                     action = action,
                     result = true,
                     shell = true,
                     position = x to y,
                     state = ActionResultState.Completed,
+                    target = ActionTarget.Coordinates,
+                    backend = ActionBackend.Root,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
+                )
+            }
+            if (!guard.isCurrent()) return ActionExecutor.staleResult(this, context)
+            if (!context.supportsAccessibilityGesture) {
+                return ActionResult(
+                    action = action,
+                    result = false,
+                    position = x to y,
+                    target = ActionTarget.Coordinates,
+                    backend = ActionBackend.Accessibility,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
                 )
             }
             val path = Path().apply { moveTo(x, y) }
@@ -217,6 +318,11 @@ sealed class ActionPerformer(val action: String) {
                 result = state.isSuccessful(),
                 position = x to y,
                 state = state,
+                target = ActionTarget.Coordinates,
+                backend = ActionBackend.Accessibility,
+                displayId = context.displayId,
+                windowId = context.windowId,
+                rotation = context.rotation,
             )
         }
     }
@@ -225,14 +331,10 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
-            if (node.isLongClickable) {
-                val result = LongClickNode.perform(node, locationProps)
-                if (result.result) {
-                    return result
-                }
-            }
-            return LongClickCenter.perform(node, locationProps)
+            return ActionExecutor.execute(this, node, locationProps, context, guard)
         }
     }
 
@@ -240,10 +342,17 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
             return ActionResult(
                 action = action,
-                result = A11yRuleEngine.performActionBack()
+                result = A11yRuleEngine.performActionBack(),
+                target = ActionTarget.Global,
+                backend = ActionBackend.Global,
+                displayId = context.displayId,
+                windowId = context.windowId,
+                rotation = context.rotation,
             )
         }
     }
@@ -252,10 +361,17 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
             return ActionResult(
                 action = action,
-                result = true
+                result = true,
+                target = ActionTarget.None,
+                backend = ActionBackend.None,
+                displayId = context.displayId,
+                windowId = context.windowId,
+                rotation = context.rotation,
             )
         }
     }
@@ -264,6 +380,8 @@ sealed class ActionPerformer(val action: String) {
         override suspend fun perform(
             node: AccessibilityNodeInfo,
             locationProps: RawSubscription.LocationProps,
+            context: ActionExecutionContext,
+            guard: ActionExecutionGuard,
         ): ActionResult {
             val rect = node.casted.boundsInScreen
             val swipeArg = locationProps.swipeArg ?: return ActionResult(
@@ -282,11 +400,17 @@ sealed class ActionPerformer(val action: String) {
             val startY = startP.second
             val endX = endP.first
             val endY = endP.second
-            if (!(ScreenUtils.inScreen(startX, startY) && ScreenUtils.inScreen(endX, endY))) {
+            if (!(ScreenUtils.inScreen(startX, startY) && ScreenUtils.inScreen(endX, endY)) ||
+                !context.allowsPoint(startX, startY) || !context.allowsPoint(endX, endY)
+            ) {
                 return ActionResult(
                     action = action,
                     result = false,
                     position = endX to endY,
+                    target = ActionTarget.Coordinates,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
                 )
             }
             TrackService.addSwipePosition(startX, startY, endX, endY, swipeArg.duration)
@@ -295,7 +419,8 @@ sealed class ActionPerformer(val action: String) {
                     startY,
                     endX,
                     endY,
-                    swipeArg.duration
+                    swipeArg.duration,
+                    context.displayId,
                 )
             ) {
                 ActionResult(
@@ -304,8 +429,26 @@ sealed class ActionPerformer(val action: String) {
                     shell = true,
                     position = endX to endY,
                     state = ActionResultState.Completed,
+                    target = ActionTarget.Coordinates,
+                    backend = ActionBackend.Root,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
                 )
             } else {
+                if (!guard.isCurrent()) return ActionExecutor.staleResult(this, context)
+                if (!context.supportsAccessibilityGesture) {
+                    return ActionResult(
+                        action = action,
+                        result = false,
+                        position = endX to endY,
+                        target = ActionTarget.Coordinates,
+                        backend = ActionBackend.Accessibility,
+                        displayId = context.displayId,
+                        windowId = context.windowId,
+                        rotation = context.rotation,
+                    )
+                }
                 val gestureDescription = GestureDescription.Builder()
                 val path = Path()
                 path.moveTo(startX, startY)
@@ -321,6 +464,11 @@ sealed class ActionPerformer(val action: String) {
                     result = state.isSuccessful(),
                     position = endX to endY,
                     state = state,
+                    target = ActionTarget.Coordinates,
+                    backend = ActionBackend.Accessibility,
+                    displayId = context.displayId,
+                    windowId = context.windowId,
+                    rotation = context.rotation,
                 )
             }
         }

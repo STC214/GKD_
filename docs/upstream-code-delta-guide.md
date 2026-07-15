@@ -826,7 +826,7 @@ a11y/ForegroundSnapshotProvider.kt
 
 ### 9.5 阶段 5：窗口与节点 generation
 
-状态：`IN PROGRESS`（`3bca44d7` 之上的工作区）。代码任务已完成，等待可控 root 缺失及慢页面专项真机验收。
+状态：`COMPLETE`。代码和审查修复已提交为 `f5c03f8f`，Android 16 专项真机验收已完成，最终验收文档尚在工作区。
 
 新增：
 
@@ -850,25 +850,32 @@ runtime/foreground/WindowGenerationState.kt
 
 阶段 5 当前新增 16 项 JVM 回归，覆盖无切换不恢复、完整有限退避、期限不续期、共享总预算、缺 root 可恢复边界、State/Content generation 策略、rotation 失效和默认/Legacy 缓存策略。当前 App 88/88、Selector 18/18、Release 与 Vital Lint 通过；APK 已覆盖安装，Root UserService UID 0，动态页面 root 滑动冒烟无新增 GKD `AndroidRuntime`。
 
+最终专项样本为 2048 条诊断、95 个事件型关联 ID、0 个孤儿链；米游社 62 个目标事件、哔哩哔哩 45 个目标事件。五次米游社冷启动自然命中一次 `WindowRootUnavailable → WindowRootRecoveryPending(attempt=1/5, delay=50)`；约 10ms 后更新 task/window 的新事件查询取得 `WindowRootAvailable`，旧恢复被更新上下文取代，没有 `WindowRootRecoveryExhausted`。这组证据证明主要缺 root 分支在真机可达，且不会靠无限轮询维持；不得把后续新事件记成定时恢复自身成功。
+
 合并时不能仅比较类名；必须核对上游是否已经改变节点过期、缓存或 `refresh()` 行为。
 
 ### 9.6 阶段 6：动作执行器
 
-预计新增：
+状态：`IN PROGRESS`（`f5c03f8f` 之上的工作区）。第一批统一提交边界、动作上下文、父节点策略和显式 displayId 已完成，动作后验证待实现。
+
+当前新增：
 
 ```text
-runtime/action/ActionExecutor.kt
-runtime/action/ActionRequest.kt
-runtime/action/ActionOutcome.kt
-runtime/action/A11yActionExecutor.kt
-runtime/action/RootActionExecutor.kt
+data/ActionExecutor.kt
 ```
 
-预计迁移：
+当前迁移：
 
-- `GkdAction` 保留规则数据定义。
-- 具体 `ActionPerformer` 逻辑逐步委托给执行器。
-- displayId、window generation、验证策略进入结构化请求。
+- `GkdAction.kt` 保留规则数据定义；`ActionResult` 新增 target、backend、displayId、windowId、rotation、windowBounds、visibleBounds 和 retryCount，序列化新增字段均有默认值。
+- `ResolvedRule.kt` 不再直接调用 performer，统一进入 `ActionExecutor`。
+- `A11yRuleEngine.kt` 将 `WindowContextToken` 转换为动作上下文，并提供可重复调用的 generation/前台/节点 guard；Root 失败切换无障碍后端前必须再次通过。
+- `InputShellCommand.kt`、`InputManager.kt`、`ShizukuApi.kt` 和 `UserService.kt` 显式传递 displayId；Root shell 使用 `input -d <displayId>`。
+- 最近可点击父节点只在节点 API 返回 false 后尝试，最多一个；已接受/已完成动作和其他未知副作用动作不重复。
+- windowBounds 与屏幕区域取交集形成 visibleBounds，坐标点采用 Android Rect 的右/下排他边界。
+
+第一批验证：App 91/91、Selector 18/18、Release、Vital Lint 通过。Android 16 非清数据覆盖安装后 Root UserService UID 0、StatusService 前台，米游社/B 站切换冒烟无崩溃。父节点回退和动作诊断仍需真实业务动作专项验收。
+
+后续预计新增动作验证状态机；暂不提前创建空的 `ActionRequest`、`ActionOutcome`、`A11yActionExecutor` 或 `RootActionExecutor` 文件，待职责能从现有 performer 中真实拆出时再迁移，避免只有类名没有边界。
 
 官方新增动作时，应先加入公共动作语义，再分别实现 A11y 和 Root 后端，不能只实现 Root 版本。
 
@@ -1350,11 +1357,11 @@ common/gkd.apk
 
 截至 2026-07-15：
 
-- 当前 HEAD 为 `3bca44d7`；阶段 0.5～4、米游社兼容和阶段 4 最终审查收口已提交。本轮阶段 5 第一批有限恢复、generation、节点刷新、测试和文档仍在工作区，尚未提交。
+- 当前 HEAD 为 `f5c03f8f`；阶段 0.5～5、米游社兼容及阶段 5 审查修复均已提交，只有本轮最终真机验收文档仍在工作区。
 - 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
 - 阶段 1 已由米游社有效 B01 现场完成闭环：连续查询稳定终止于 `SelectorMiss`，窄范围兼容层随后完成真实未签到点击、弹窗关闭和累计签到天数变化验收。
-- 当前 Release 为 `1.12.1-3bca44d-dirty`，SHA-256 `1151E53FA7DCAD8F4B8212D2D04F0C81663F133EFCF52609C00DCE23C68C620D`，3,320,183 字节；App 88/88、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装：主进程 PID `24515`，Root UserService PID `18339`、UID 0，StatusService 为前台；root 动态页面滑动冒烟后无新增 GKD `AndroidRuntime`。
+- 当前 Release 为 `1.12.1-f5c03f8-dirty`，SHA-256 `1817E1F99DFCAFEC6CA5D001A3A9F9661DCC382FCC89519254C49AD8B5200848`，3,336,575 字节；App 91/91、Selector 18/18、Release 和 Vital Lint 全部通过。APK 已非清数据覆盖安装：主进程 PID `12288`，Root UserService PID `29736`、UID 0，StatusService 为前台；米游社/B 站切换及动态页面滚动后无新增 GKD `AndroidRuntime`。
 - 真机已恢复 Root/自动化原配置，Root UserService UID 0，临时 HTTP 服务和快照已清除。重启后的 KernelSU `ksu` SELinux 域不能直接读取 App 私有目录，因此本轮未重复宣称配置/订阅文件哈希验收，改用 App 首页实际加载结果作为非清数据证据。
-- 阶段 3、4 已完成，阶段 5 第一批已完成；下一步处理动态缓存时效、旋转/显示屏显式 generation 信号和慢页面专项回归。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
+- 阶段 3、4、5 已完成，阶段 6 第一批统一动作执行器已完成；下一步实现动作后验证。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
 
 最新整体状态以 [`current-progress.md`](current-progress.md) 为入口；本文仍负责记录每项代码级差异和未来上游迁移方法。

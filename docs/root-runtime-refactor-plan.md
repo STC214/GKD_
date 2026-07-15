@@ -303,7 +303,7 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 - 快速页面切换后不会使用上一页面坐标。
 - 重试达到上限后明确报告失败原因并停止，不持续耗电。
 
-当前实现结果：`WindowRootRecoveryState` 只接受显式切换信号，3 秒窗口内由整个切换共享 5 次退避总预算，root 缺失本身不能开启或延长恢复。焦点 Application Window 已存在但 rootAppId 暂空时，会在普通前台确认之前进入恢复，因此五级链路覆盖主要挂载竞态。`WindowGenerationState` 只为 State/App/亮屏/动作以及 display/rotation 变化推进结构 generation；Content 事件继续进入 pending 查询并清理对应事件分支，避免动态页面全局换代饥饿。`A11yContext` 在下一轮结构查询清空旧 root 与遍历缓存，节点默认缓存缩短为 500/1000ms并使用单调时钟，保留 1000/2000ms 保守策略。选择器结果携带 generation、taskId、windowId、appId、displayId 和 rotation；目标节点必须先 `refresh()`，失败时只在上下文完全一致时重取 root 并复跑同一规则。App 88/88、Selector 18/18、Release 与 Vital Lint 已通过；代码任务已完成，可控 root 缺失故障注入和米游社/哔哩哔哩专项统计仍待真机验收。
+当前实现结果：`WindowRootRecoveryState` 只接受显式切换信号，3 秒窗口内由整个切换共享 5 次退避总预算，root 缺失本身不能开启或延长恢复。焦点 Application Window 已存在但 rootAppId 暂空时，会在普通前台确认之前进入恢复，因此五级链路覆盖主要挂载竞态。`WindowGenerationState` 只为 State/App/亮屏/动作以及 display/rotation 变化推进结构 generation；Content 事件继续进入 pending 查询并清理对应事件分支，避免动态页面全局换代饥饿。`A11yContext` 在下一轮结构查询清空旧 root 与遍历缓存，节点默认缓存缩短为 500/1000ms并使用单调时钟，保留 1000/2000ms 保守策略。选择器结果携带 generation、taskId、windowId、appId、displayId 和 rotation；目标节点必须先 `refresh()`，失败时只在上下文完全一致时重取 root 并复跑同一规则。App 88/88、Selector 18/18、Release 与 Vital Lint 已通过；Android 16 最终专项缓存为 2048 条、95 个事件型关联 ID、0 个孤儿链，米游社冷启动真实命中一次第 1 级 50ms 缺 root 恢复入口；约 10ms 后更新 task/window 的新事件取得 root 并取代旧恢复，无恢复耗尽或崩溃。阶段 5 已完成。
 
 ### 阶段 6：抽象并增强动作执行器
 
@@ -311,14 +311,14 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 
 任务：
 
-- [ ] 引入 `ActionExecutor`，将规则语义与具体输入后端分离。
-- [ ] 动作执行前再次验证窗口 generation 和节点新鲜度。
-- [ ] 节点点击失败时，可尝试最近的可点击父节点。
-- [ ] 坐标动作携带 displayId、窗口区域、旋转和可见区域信息。
+- [x] 引入 `ActionExecutor`，建立规则语义与具体输入后端之间的统一提交边界。
+- [x] 动作执行前再次验证窗口 generation 和节点新鲜度；Root 失败转无障碍前再次复核。
+- [x] 节点点击失败时，只尝试最近一个可点击父节点。
+- [x] 坐标动作携带 displayId、窗口区域、旋转和可见区域信息。
 - [ ] 对可验证动作，在完成后观察节点消失、窗口变化或规则指定条件。
-- [ ] 只有明确标记为安全的内部动作策略才允许重试一次。
-- [ ] 默认不对未知副作用动作重试。
-- [ ] 保持现有 `click`、`clickNode`、`clickCenter`、`longClick`、`swipe`、`back` 等规则动作兼容。
+- [x] 只有节点 API 明确拒绝后的最近父节点策略允许重试一次。
+- [x] 默认不对已接受、已完成或未知副作用动作重试。
+- [x] 保持现有 `click`、`clickNode`、`clickCenter`、`longClick`、`swipe`、`back` 等规则动作兼容。
 
 验收：
 
@@ -326,6 +326,8 @@ Activity 级规则：以 focused Task 的 topActivity 为主。
 - 节点动作、坐标动作和动作后验证分别记录结果。
 - 不安全动作不会自动重复。
 - 原订阅无需增加字段即可继续执行。
+
+当前实现结果（第一批）：新增 `ActionExecutionContext`、`ActionExecutionGuard` 与统一 `ActionExecutor`。规则引擎把阶段 5 的 `WindowContextToken` 转换为动作上下文，携带 displayId、windowId、rotation、windowBounds 和 visibleBounds；提交前及 Root 坐标后端失败转无障碍手势前均重新确认 generation、前台和节点新鲜度。Root 输入链显式设置 displayId，非默认显示屏没有对应无障碍手势能力时拒绝回退。节点 API 明确返回 false 时最多尝试最近一个符合条件且可见的父节点，父节点已拒绝后不继续遍历更多祖先；传统 `click` 的节点到坐标兼容路径仍只在前序 API 明确拒绝后进入。动作结果记录 target、backend、窗口上下文和 retryCount。App 91/91、Selector 18/18、Release 与 Vital Lint 已通过；Android 16 非清数据覆盖安装后主进程、UID 0 Root UserService 和 StatusService 正常，米游社/B 站切换冒烟无新增 GKD 崩溃。动作后界面验证尚未实现，阶段 6 保持进行中。
 
 ### 阶段 7：接入 APK 内置 RootService
 
@@ -460,7 +462,7 @@ test(phase-9): ...
 | 2. 动作结果误判修复 | 已完成 | Root 完成路径、无障碍取消路径、失败不计次数/冷却和订阅不变量均已验收。 |
 | 3. 查询唤醒重构 | 已完成 | `QueryWakeState` 单 runner、有界 pending、常量空间事件缓冲、规则晚加载补查、39 项 App 测试和真机事件风暴冒烟均通过。 |
 | 4. 前台与焦点窗口融合 | 已完成 | 多任务/窗口融合、覆盖层策略、单调时钟 150ms 确认、规则与动作门控、根错配单次补查及 Activity 来源收口均已完成。 |
-| 5. 窗口与节点恢复 | 进行中 | 代码任务已完成：可达的有限退避、共享总预算、结构 generation、Content 分支失效、单调短缓存、rotation/display 门控和节点重定位均已接入；专项真机验收待完成。 |
+| 5. 窗口与节点恢复 | 已完成 | 有限退避、共享总预算、结构 generation、Content 分支失效、单调短缓存、rotation/display 门控和节点重定位均已接入；米游社/B 站专项真机验收通过。 |
 | 6. 动作执行器增强 | 未开始 | |
 | 7. APK 内置 RootService | 未开始 | |
 | 8. 多用户与多显示屏 | 未开始 | |

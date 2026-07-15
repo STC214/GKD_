@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ServiceConnection
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.view.Display
 import android.os.IBinder
 import android.util.Log
 import android.view.SurfaceControlHidden
@@ -164,17 +165,30 @@ data class UserServiceWrapper(
         CommandResult(code = null, result = "", error = e.message)
     }
 
-    fun tap(x: Float, y: Float, duration: Long = 0): Boolean {
+    fun tap(
+        x: Float,
+        y: Float,
+        duration: Long = 0,
+        displayId: Int = Display.DEFAULT_DISPLAY,
+    ): Boolean {
+        val displayArg = "-d $displayId"
         val command = if (duration > 0) {
-            "input swipe $x $y $x $y $duration"
+            "input $displayArg swipe $x $y $x $y $duration"
         } else {
-            "input tap $x $y"
+            "input $displayArg tap $x $y"
         }
         return execCommandForResult(command).ok
     }
 
-    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, duration: Long): Boolean {
-        val command = "input swipe $x1 $y1 $x2 $y2 $duration"
+    fun swipe(
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        duration: Long,
+        displayId: Int = Display.DEFAULT_DISPLAY,
+    ): Boolean {
+        val command = "input -d $displayId swipe $x1 $y1 $x2 $y2 $duration"
         return execCommandForResult(command).ok
     }
 
