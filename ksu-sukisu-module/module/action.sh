@@ -4,36 +4,39 @@ MODDIR=${0%/*}
 CONFIG="$MODDIR/config.conf"
 LOG="$MODDIR/service.log"
 GKD_PACKAGE=li.songe.gkd
+GKD_USER_ID=0
 [ -f "$CONFIG" ] && . "$CONFIG"
+case "$GKD_USER_ID" in
+  ''|*[!0-9]*) GKD_USER_ID=0 ;;
+esac
 
-echo "GKD KernelSU/SukiSU Helper"
+echo "GKD KernelSU/SukiSU Keepalive Helper"
 echo "Module path: $MODDIR"
 echo "Package: $GKD_PACKAGE"
+echo "Android user: $GKD_USER_ID"
 echo
 
-if pm path "$GKD_PACKAGE" >/dev/null 2>&1; then
+if pm path --user "$GKD_USER_ID" "$GKD_PACKAGE" >/dev/null 2>&1; then
   echo "GKD app: installed"
 else
   echo "GKD app: not installed"
-  echo "Open failed: package is missing."
+  echo "This module does not bundle or install GKD. Install the app separately."
   exit 1
 fi
 
 echo "Config:"
-echo "  GKD_AUTO_INSTALL=${GKD_AUTO_INSTALL:-1}"
-echo "  GKD_AUTO_GRANT=${GKD_AUTO_GRANT:-1}"
-echo "  GKD_AUTO_ENABLE_A11Y=${GKD_AUTO_ENABLE_A11Y:-0}"
+echo "  GKD_USER_ID=$GKD_USER_ID"
 echo "  GKD_AUTO_START=${GKD_AUTO_START:-1}"
 echo "  GKD_KEEP_ALIVE=${GKD_KEEP_ALIVE:-1}"
 echo "  GKD_KEEP_ALIVE_INTERVAL=${GKD_KEEP_ALIVE_INTERVAL:-300}"
-echo "  GKD_REGRANT_INTERVAL=${GKD_REGRANT_INTERVAL:-1800}"
-echo "  GKD_UNINSTALL_ON_REMOVE=${GKD_UNINSTALL_ON_REMOVE:-1}"
+echo "  GKD_POLICY_REFRESH_INTERVAL=${GKD_POLICY_REFRESH_INTERVAL:-1800}"
+echo "  GKD_LOG_MAX_BYTES=${GKD_LOG_MAX_BYTES:-262144}"
 echo
 
 echo "Opening GKD..."
-if monkey -p "$GKD_PACKAGE" 1 >/dev/null 2>&1; then
+if monkey --user "$GKD_USER_ID" -p "$GKD_PACKAGE" 1 >/dev/null 2>&1; then
   echo "Open command: monkey succeeded"
-elif am start -n "$GKD_PACKAGE/.MainActivity"; then
+elif am start --user "$GKD_USER_ID" -n "$GKD_PACKAGE/.MainActivity"; then
   echo "Open command: am start succeeded"
 else
   echo "Open command: failed"

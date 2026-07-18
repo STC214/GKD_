@@ -629,3 +629,5 @@ Root AIDL 协议从 1 升至 2，新增固定事务 6 `getForegroundTask(display
 加入即时撤权提示后的最终自动回归为 App 123/123、Selector 18/18、`assembleGkdRelease`、R8、`lintVitalGkdRelease` 全部通过。Release APK SHA-256 `54AA0B66FFCD3FDC55F55C7029D978EE6DADEC141B1B5786C3F21BBA6703D694`，3,356,704 字节。
 
 最终代码审查又发现“绑定途中显式关闭后，旧 `ServiceConnection` 回调可能覆盖当前状态”的竞态。改为独立连接对象和连接代次门控后，Root 专项单元测试通过；增量 Release APK 的元数据与 v2 签名验证通过，SHA-256 `0A59223FCCF6752D77CF94D8978FCF9FA5A34FDB463B27A07B150E3E57BF3C12`，3,373,088 字节。该审查只收紧客户端生命周期，不修改 AIDL 协议、规则格式、订阅或数据库。
+
+阶段 7 整体提交为 `f36a0d71` 后，从干净工作区重新执行 `app:assembleGkdRelease --stacktrace`，构建于 2026-07-15 21:52 成功完成（包含 R8 与 Vital Lint）。正式 APK 为 `1.12.1-f36a0d7`、versionCode 92，SHA-256 `8ABB34862065D51E7D76027B6F3E90A150D8BF0EA546748D1637A63EFC28B436`，3,373,080 字节，APK Signature Scheme v2 验证通过。本轮 ADB 无连接设备，因此该干净提交 APK 的安装冒烟留待后续，不把旧 Debug/dirty 包的真机结果冒充为本产物结果。

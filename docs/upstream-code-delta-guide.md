@@ -133,6 +133,11 @@ git rev-list --left-right --count FETCH_HEAD...HEAD
 | 11 | `f2e60bd0` | 动作结果可信化、诊断导出与当前进度入口 | 保留真实完成/取消结果和失败不触发规则语义 |
 | 12 | `ee8c484c` | 米游社兼容、规则汇总补查、查询唤醒状态机和阶段 4 第一批前台模型 | 按 9.2～9.4 的不变量迁移；本轮审查修复仍在工作区 |
 | 13 | `3d7e18e3` | 阶段 4 第一批审查修复及文档同步 | 保留规则汇总首值、严格快照确认和 TaskStack 统一重采样；第二批融合接入仍在工作区 |
+| 14 | `3bca44d7` | 阶段 4 前台确认收口和阶段 5 恢复前置状态 | 保留冲突确认、root 错配有限补查与结构化拒绝原因 |
+| 15 | `f5c03f8f` | 阶段 5 窗口恢复、generation 和节点缓存策略 | 保留有限恢复、结构/内容分代及短时节点缓存 |
+| 16 | `abfc9838` | 阶段 6 统一动作执行上下文和真实输入结果 | 保留动作 guard、后端结果与安全父节点回退 |
+| 17 | `ff902ba7` | 阶段 6 动作验证及阶段 7 RootService 前两切片 | 保留只观察验证、最小 AIDL、调用方校验和结构化输入 |
+| 18 | `f36a0d71` | 阶段 7 特权输入桥、Root Task、生命周期及最终竞态修复 | 整体迁移 AIDL/客户端/服务端/设置/测试，不拆出协议不一致的中间版本 |
 
 整合上游时可以使用：
 
@@ -167,12 +172,12 @@ git diff --name-status "$base..HEAD"
 | `ksu-sukisu-module/README.md` | `CURRENT` 新增 | 模块文档 | 低 | 与模块实际行为同步 |
 | `module/action.sh` | `CURRENT` 新增 | 模块动作页 | 低 | 模块存在时独立维护 |
 | `module/config.conf` | `CURRENT` 新增 | 模块配置 | 低 | 默认值与 `service.sh` 一致 |
-| `module/customize.sh` | `CURRENT` 新增 | 模块安装 | 低 | 校验文件与权限 |
+| `module/customize.sh` | `CURRENT` 新增 | 模块初始化 | 低 | 提示纯保活边界并设置权限 |
 | `module/module.prop` | `CURRENT` 新增 | 模块元数据 | 低 | 打包时生成版本，不手工信任旧值 |
 | `module/service.sh` | `CURRENT` 新增 | 模块启动/守护 | 中 | 真机和 ZIP 共同验证 |
 | `module/skip_mount` | `CURRENT` 新增 | 模块标记 | 低 | 保留空标记文件 |
-| `module/uninstall.sh` | `CURRENT` 新增 | 模块卸载 | 中 | 明确数据风险后再保留默认卸载 |
-| `package-ksu-module.ps1` | `CURRENT` 新增 | 构建打包 | 中 | 跟随上游 APK 产物路径调整 |
+| `module/uninstall.sh` | `CURRENT` 新增 | 模块卸载 | 低 | 恢复后台 AppOps、清理电池白名单，不卸载 App |
+| `package-ksu-module.ps1` | `CURRENT` 新增 | 模块打包 | 低 | 不构建或打包 APK，校验归档无 `.apk` |
 
 以下工作区文档尚未属于上述已提交差异：
 
@@ -372,20 +377,19 @@ rawPicture/fallback Bitmap
 
 ### 8.1 定位
 
-当前 `ksu-sukisu-module/` 是普通 APK 的安装和运行辅助，不替代规则引擎，不是 Root 加强版 App 的最终 root 运行时。
+当前 `ksu-sukisu-module/` 是已安装普通 APK 的纯保活辅助，不替代规则引擎，也不承担 Root 加强版 App 的安装、更新或权限配置。
 
 它当前负责：
 
-- 可选安装内置 APK；
-- 授予通知和安全设置权限；
 - 配置后台 AppOps；
 - 加入电池白名单；
-- 可选开启无障碍；
 - 后台启动 `ExposeService`；
 - 低频检查 GKD 进程和常驻通知服务；
-- 定期重授权；
+- 定期刷新后台 AppOps 和电池白名单；
 - 在模块执行页展示状态和日志；
-- 卸载模块时按配置卸载 App。
+- 卸载模块时恢复模块设置的后台 AppOps 并清理电池白名单，始终保留 App、App 权限和数据。
+
+模块 ZIP 不包含 APK。目标 App 未安装时仅记录并等待用户自行安装，不下载、不安装、不更新任何包；通知权限、无障碍、Root 增强和业务设置均由 App/系统界面管理。
 
 ### 8.2 配置契约
 
@@ -394,15 +398,12 @@ rawPicture/fallback Bitmap
 | 变量 | 当前默认值 | 含义 |
 | --- | ---: | --- |
 | `GKD_PACKAGE` | `li.songe.gkd` | 目标包名 |
-| `GKD_AUTO_INSTALL` | `1` | 自动安装 APK |
-| `GKD_AUTO_GRANT` | `1` | 自动授权和配置 AppOps |
-| `GKD_AUTO_ENABLE_A11Y` | `0` | 自动开启无障碍 |
+| `GKD_USER_ID` | `0` | 目标 Android 用户；所有检测、启动、AppOps 和设置读取必须一致 |
 | `GKD_AUTO_START` | `1` | 开机后台启动 |
 | `GKD_KEEP_ALIVE` | `1` | 启用低频守护 |
 | `GKD_KEEP_ALIVE_INTERVAL` | `300` | 守护间隔秒数 |
-| `GKD_REGRANT_INTERVAL` | `1800` | 重授权间隔秒数 |
-| `GKD_REQUIRE_BUNDLED_APK` | `0` | 内置 APK 安装失败是否停止 |
-| `GKD_UNINSTALL_ON_REMOVE` | `1` | 移除模块时卸载 App |
+| `GKD_POLICY_REFRESH_INTERVAL` | `1800` | 后台策略刷新间隔秒数 |
+| `GKD_LOG_MAX_BYTES` | `262144` | 日志轮转大小上限 |
 
 修改任何默认值时，必须同时搜索：
 
@@ -414,34 +415,19 @@ rg -n "GKD_[A-Z_]+" ksu-sukisu-module README.md CHANGELOG.md
 
 `package-ksu-module.ps1` 当前：
 
-- 默认执行 `app:assembleGkdRelease`；
-- 支持 `-ApkPath`；
-- 支持 `-SkipBuild`；
-- 从 release 输出中选择 APK；
+- 不执行 Gradle，也不接受 APK 路径；
 - 使用分钟级时间戳写入模块版本；
-- 将 APK 放入 `common/gkd.apk`；
+- 只打包 `module/` 模板内容；
+- 重新打开 ZIP，拒绝反斜杠路径和任何 `.apk` 条目；
 - 输出 `ksu-sukisu-module/dist/gkd-ksu-sukisu-module.zip`。
 
-官方更新后重点检查：
+2026-07-18 审查收口后的纯保活产物版本为 `202607182116`，ZIP 共 7 个根级文件、无 APK，SHA-256 为 `79B0EE936BDEFC9B49AEBC1E91C5830CCBD80CDCB2C5E2E6A7504A733A4AE77E`。所有包、进程、服务、AppOps 和设置读取统一使用 `GKD_USER_ID`，进程按目标包 UID 识别；日志大小非法值安全回退，卸载恢复后台 AppOps，打包采用固定文件白名单。已完成 shell 语法、LF/无 BOM 和归档结构检查，按用户要求不做真机验证。
 
-- Gradle task 名是否变化。
-- product flavor 是否仍为 `gkd`。
-- APK 输出目录和文件名是否变化。
-- `versionCode` 约束是否变化。
-- 签名配置是否仍兼容覆盖安装。
-- Manifest 中 `ExposeService` 组件名和 exported 状态是否变化。
+官方更新后重点检查 `ExposeService` 和 `StatusService` 组件名/启动契约、设置文件位置以及目标包名是否变化。无需跟踪 APK 输出路径、签名或 Gradle flavor。
 
 ### 8.4 RootService 完成后的去留决策
 
-RootService 稳定前，模块维持 `CURRENT`。
-
-RootService 完成长测后，单独决定：
-
-1. 保留模块作为自动安装/开机辅助；
-2. 精简为只安装 APK；
-3. 完全退役模块。
-
-不得在 RootService 初次可运行时立即删除模块。必须先验证 APK 自启动、root 撤权、更新安装、卸载清理和 ROM 后台限制。
+RootService 已稳定后，模块收缩为纯保活并继续维持 `CURRENT`。后续仅在 App 自身可以稳定抵抗目标 ROM 后台清理并完成长测时，才考虑完全退役模块；不得重新加入 APK、自动授权或无障碍写入来绕过 App 的用户授权边界。
 
 ## 9. 规划中的 Root 加强版代码差异地图
 
@@ -1286,7 +1272,7 @@ git ls-files -o --exclude-standard
 仅在模块仍维护时执行：
 
 ```powershell
-.\ksu-sukisu-module\scripts\package-ksu-module.ps1 -SkipBuild
+.\ksu-sukisu-module\scripts\package-ksu-module.ps1
 ```
 
 必须重新打开 ZIP 检查实际内容，不只检查工作树：
@@ -1299,8 +1285,9 @@ action.sh
 config.conf
 uninstall.sh
 skip_mount
-common/gkd.apk
 ```
+
+归档中不得出现 `common/gkd.apk` 或任何其他 `.apk` 条目。
 
 ## 15. 每个编码阶段必须附带的文档步骤
 
@@ -1412,12 +1399,12 @@ common/gkd.apk
 
 ## 18. 当前工作区待办
 
-截至 2026-07-15：
+截至 2026-07-18：
 
-- 当前 HEAD 为 `ff902ba7`；阶段 0.5～6 和阶段 7 前两切片已提交，第三切片显式特权桥仍在工作区。
+- 当前代码提交为 `f36a0d71`；阶段 0.5～7 的代码、测试和截至该提交的维护文档均已落库。
 - 阶段 0.5 Root 桥真实性与自恢复已完成；阶段 2 动作结果误判修复已完成。
 - 阶段 1 已由米游社有效 B01 现场完成闭环：连续查询稳定终止于 `SelectorMiss`，窄范围兼容层随后完成真实未签到点击、弹窗关闭和累计签到天数变化验收。
-- 当前 Release 为 `1.12.1-ff902ba-dirty`，SHA-256 `0A59223FCCF6752D77CF94D8978FCF9FA5A34FDB463B27A07B150E3E57BF3C12`，3,373,088 字节；App 123/123、Selector 18/18、Release/R8/Vital Lint 全部通过，最终绑定竞态修复另通过 Root 专项测试与增量 Release 产物/签名验证。阶段 7 Debug APK 已完成协议 2、无 Shizuku 完整规则链、重连/停连、拒绝/超时、撤权收口、A11y 回退、覆盖更新和重新授权验收。
+- 当前正式 Release 为 `1.12.1-f36a0d7`（versionCode 92），SHA-256 `8ABB34862065D51E7D76027B6F3E90A150D8BF0EA546748D1637A63EFC28B436`，3,373,080 字节；从干净提交执行 `assembleGkdRelease` 成功，包含 R8 与 Vital Lint，APK v2 签名验证通过。App 123/123、Selector 18/18 及最终 Root 专项测试沿用阶段 7 收口结果。阶段 7 Debug APK 已完成协议 2、无 Shizuku 完整规则链、重连/停连、拒绝/超时、撤权收口、A11y 回退、覆盖更新和重新授权验收；本次正式 APK 尚待下次连接手机后安装冒烟。
 - 真机已恢复 Root/自动化原配置，Root UserService UID 0，临时 HTTP 服务和快照已清除。重启后的 KernelSU `ksu` SELinux 域不能直接读取 App 私有目录，因此本轮未重复宣称配置/订阅文件哈希验收，改用 App 首页实际加载结果作为非清数据证据。
 - 阶段 3～7 已完成，阶段 7 最终审查与提交边界整理也已收口；下一步进入阶段 8。阶段 0 的 B02、规则重复统计和剩余窗口场景继续并行采样。
 - 阶段 6 安全动作最终清理状态覆盖上方早期冒烟快照：触发总数已恢复为测试前的 7727，内存订阅及对应动作日志、临时 HTTP 服务和 ADB 转发均已清除；最终进程与诊断证据以本节上一条 Release 记录和 `current-progress.md` 为准。
