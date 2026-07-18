@@ -7,11 +7,8 @@ LOG="$MODDIR/service.log"
 log() {
   if [ -f "$LOG" ]; then
     local log_size
-    local max_bytes="${GKD_LOG_MAX_BYTES:-262144}"
-    case "$max_bytes" in
-      ''|*[!0-9]*) max_bytes=262144 ;;
-    esac
-    [ "$max_bytes" -lt 4096 ] && max_bytes=4096
+    local max_bytes
+    max_bytes="$(sanitize_number "${GKD_LOG_MAX_BYTES:-262144}" 262144 4096 10485760)"
     log_size="$(wc -c < "$LOG" 2>/dev/null)"
     if [ "${log_size:-0}" -gt "$max_bytes" ]; then
       tail -n 1000 "$LOG" > "$LOG.tmp" 2>/dev/null && mv -f "$LOG.tmp" "$LOG"
@@ -23,8 +20,6 @@ log() {
 load_config() {
   GKD_PACKAGE=li.songe.gkd
   GKD_USER_ID=0
-  GKD_AUTO_START=1
-  GKD_KEEP_ALIVE=1
   GKD_KEEP_ALIVE_INTERVAL=300
   GKD_POLICY_REFRESH_INTERVAL=1800
   GKD_LOG_MAX_BYTES=262144
@@ -39,26 +34,29 @@ load_config() {
 
 wait_boot_completed() {
   local tries=0
-  while [ "$tries" -lt 120 ]; do
+  while true; do
     [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] && return 0
     tries=$((tries + 1))
+    if [ $((tries % 30)) -eq 0 ]; then
+      log "waiting for sys.boot_completed=1"
+    fi
     sleep 2
   done
-  return 1
 }
 
 wait_system_services() {
   local tries=0
-  while [ "$tries" -lt 60 ]; do
+  while true; do
     if pm path android >/dev/null 2>&1 &&
       cmd activity get-current-user >/dev/null 2>&1; then
       return 0
     fi
     tries=$((tries + 1))
+    if [ $((tries % 30)) -eq 0 ]; then
+      log "waiting for PackageManager and ActivityManager"
+    fi
     sleep 2
   done
-  log "system service wait timeout; continue anyway"
-  return 1
 }
 
 package_installed() {
@@ -101,8 +99,7 @@ apply_background_policy() {
   run_once "deviceidle whitelist" dumpsys deviceidle whitelist +"$GKD_PACKAGE"
 }
 
-start_gkd() {
-  [ "$GKD_AUTO_START" = "1" ] || return 0
+start_gkd_once() {
   if ! package_installed; then
     log "skip start: $GKD_PACKAGE is not installed; this module does not bundle or install the app"
     return 1
@@ -115,17 +112,61 @@ start_gkd() {
     --ei expose -1
 }
 
-sanitize_interval() {
-  case "$1" in
-    ''|*[!0-9]*) echo "$2" ;;
-    *)
-      if [ "$1" -lt "$3" ]; then
-        echo "$3"
-      else
-        echo "$1"
+start_gkd_until_running() {
+  local reason="$1"
+  local attempt=1
+  local delay=2
+
+  while package_installed; do
+    if confirm_gkd_process_stable; then
+      log "$reason: stable GKD process confirmed for user $GKD_USER_ID"
+      return 0
+    fi
+
+    log "$reason: startup attempt $attempt"
+    if start_gkd_once; then
+      if confirm_gkd_process_stable; then
+        log "$reason: stable GKD process startup confirmed for user $GKD_USER_ID"
+        return 0
       fi
-      ;;
+      log "$reason: start command completed but process stability was not confirmed"
+    fi
+
+    log "$reason: startup not confirmed; retrying in ${delay}s"
+    sleep "$delay"
+    [ "$delay" -lt 30 ] && delay=$((delay + 2))
+    attempt=$((attempt + 1))
+  done
+
+  log "$reason: $GKD_PACKAGE is no longer installed; returning to sleep state"
+  return 1
+}
+
+sanitize_number() {
+  local value="$1"
+  local fallback="$2"
+  local minimum="$3"
+  local maximum="$4"
+
+  case "$value" in
+    ''|*[!0-9]*) value="$fallback" ;;
   esac
+  while [ "${value#0}" != "$value" ]; do
+    value="${value#0}"
+  done
+  [ -n "$value" ] || value=0
+
+  # All supported maxima fit within nine decimal digits. Clamp longer input
+  # before integer comparison so vendor shells never see an overflowing value.
+  if [ "${#value}" -gt 9 ]; then
+    echo "$maximum"
+  elif [ "$value" -lt "$minimum" ]; then
+    echo "$minimum"
+  elif [ "$value" -gt "$maximum" ]; then
+    echo "$maximum"
+  else
+    echo "$value"
+  fi
 }
 
 gkd_process_running() {
@@ -141,6 +182,17 @@ gkd_process_running() {
     [ "$process_uid" = "$expected_uid" ] && return 0
   done
   return 1
+}
+
+confirm_gkd_process_stable() {
+  local checks=0
+
+  while [ "$checks" -lt 3 ]; do
+    sleep 1
+    gkd_process_running || return 1
+    checks=$((checks + 1))
+  done
+  return 0
 }
 
 status_service_running() {
@@ -173,6 +225,22 @@ status_service_requested() {
   status_service_running
 }
 
+wait_for_gkd_installation() {
+  local interval
+
+  while true; do
+    load_config
+    if package_installed; then
+      log "package detected for user $GKD_USER_ID: $GKD_PACKAGE"
+      return 0
+    fi
+
+    interval="$(sanitize_number "$GKD_KEEP_ALIVE_INTERVAL" 300 60 86400)"
+    log "$GKD_PACKAGE is not installed for user $GKD_USER_ID; sleeping ${interval}s"
+    sleep "$interval"
+  done
+}
+
 keep_alive_loop() {
   local elapsed=0
   local interval
@@ -181,27 +249,22 @@ keep_alive_loop() {
   log "keep-alive watchdog started"
   while true; do
     load_config
-    [ "$GKD_KEEP_ALIVE" = "1" ] || {
-      log "keep-alive watchdog disabled"
-      return 0
-    }
-
-    interval="$(sanitize_interval "$GKD_KEEP_ALIVE_INTERVAL" 300 60)"
-    refresh_interval="$(sanitize_interval "$GKD_POLICY_REFRESH_INTERVAL" 1800 300)"
+    interval="$(sanitize_number "$GKD_KEEP_ALIVE_INTERVAL" 300 60 86400)"
+    refresh_interval="$(sanitize_number "$GKD_POLICY_REFRESH_INTERVAL" 1800 300 604800)"
     sleep "$interval"
     elapsed=$((elapsed + interval))
 
     if ! package_installed; then
-      log "keep-alive: $GKD_PACKAGE is not installed; waiting for the user to install it"
-      continue
+      log "keep-alive: $GKD_PACKAGE was removed; returning to sleep state"
+      return 1
     fi
 
     if ! gkd_process_running; then
       log "keep-alive: GKD process is not running; restarting"
-      start_gkd
+      start_gkd_until_running "keep-alive" || return 1
     elif status_service_requested && ! status_service_running; then
       log "keep-alive: status service is not running; requesting recovery"
-      start_gkd
+      start_gkd_once
     fi
 
     if [ "$elapsed" -ge "$refresh_interval" ]; then
@@ -214,17 +277,13 @@ keep_alive_loop() {
 {
   load_config
   log "keep-alive service started"
-  if wait_boot_completed; then
-    wait_system_services
-    if package_installed; then
-      apply_background_policy
-      start_gkd
-    else
-      log "$GKD_PACKAGE is not installed; watchdog will wait without installing an APK"
+  wait_boot_completed
+  wait_system_services
+  while true; do
+    wait_for_gkd_installation
+    apply_background_policy
+    if start_gkd_until_running "startup"; then
+      keep_alive_loop
     fi
-    keep_alive_loop
-    log "keep-alive service stopped"
-  else
-    log "boot wait timeout"
-  fi
+  done
 } &

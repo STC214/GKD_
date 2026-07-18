@@ -76,7 +76,7 @@ git rev-list --left-right --count FETCH_HEAD...HEAD
 
 当前已提交版本在官方基线之上增加：
 
-- KernelSU/SukiSU Ultra 安装、授权、后台启动和保活包装。
+- KernelSU/SukiSU Ultra 纯保活、开机后台拉起和低频恢复包装。
 - 模块打包脚本、配置、执行页日志和卸载行为。
 - 截图与 Bitmap/VirtualDisplay/ImageReader 生命周期修复。
 - HTTP 服务销毁时主动停止服务器。
@@ -384,6 +384,7 @@ rawPicture/fallback Bitmap
 - 配置后台 AppOps；
 - 加入电池白名单；
 - 后台启动 `ExposeService`；
+- 未安装时低频休眠；已安装但未运行时持续退避拉起，连续 3 秒确认目标 UID 进程稳定后才进入保活；
 - 低频检查 GKD 进程和常驻通知服务；
 - 定期刷新后台 AppOps 和电池白名单；
 - 在模块执行页展示状态和日志；
@@ -399,11 +400,9 @@ rawPicture/fallback Bitmap
 | --- | ---: | --- |
 | `GKD_PACKAGE` | `li.songe.gkd` | 目标包名 |
 | `GKD_USER_ID` | `0` | 目标 Android 用户；所有检测、启动、AppOps 和设置读取必须一致 |
-| `GKD_AUTO_START` | `1` | 开机后台启动 |
-| `GKD_KEEP_ALIVE` | `1` | 启用低频守护 |
-| `GKD_KEEP_ALIVE_INTERVAL` | `300` | 守护间隔秒数 |
-| `GKD_POLICY_REFRESH_INTERVAL` | `1800` | 后台策略刷新间隔秒数 |
-| `GKD_LOG_MAX_BYTES` | `262144` | 日志轮转大小上限 |
+| `GKD_KEEP_ALIVE_INTERVAL` | `300` | 守护间隔秒数，限制 60～86400 |
+| `GKD_POLICY_REFRESH_INTERVAL` | `1800` | 后台策略刷新间隔秒数，限制 300～604800 |
+| `GKD_LOG_MAX_BYTES` | `262144` | 日志轮转大小上限，限制 4096～10485760 |
 
 修改任何默认值时，必须同时搜索：
 
@@ -421,7 +420,7 @@ rg -n "GKD_[A-Z_]+" ksu-sukisu-module README.md CHANGELOG.md
 - 重新打开 ZIP，拒绝反斜杠路径和任何 `.apk` 条目；
 - 输出 `ksu-sukisu-module/dist/gkd-ksu-sukisu-module.zip`。
 
-2026-07-18 审查收口后的纯保活产物版本为 `202607182116`，ZIP 共 7 个根级文件、无 APK，SHA-256 为 `79B0EE936BDEFC9B49AEBC1E91C5830CCBD80CDCB2C5E2E6A7504A733A4AE77E`。所有包、进程、服务、AppOps 和设置读取统一使用 `GKD_USER_ID`，进程按目标包 UID 识别；日志大小非法值安全回退，卸载恢复后台 AppOps，打包采用固定文件白名单。已完成 shell 语法、LF/无 BOM 和归档结构检查，按用户要求不做真机验证。
+2026-07-18 风险收口后的纯保活产物版本为 `202607182357`，ZIP 共 7 个根级文件、无 APK，SHA-256 为 `5262C4697171D9E420F5A902F85B6305E13EF17AA8BA640C74B76F2241F9C22E`。所有包、进程、服务、AppOps 和设置读取统一使用 `GKD_USER_ID`，进程按目标包 UID 识别。开机和系统服务均持续等待；目标用户未安装 GKD 时按保活间隔休眠，已安装时以 2 秒递增、最高 30 秒的退避持续拉起，连续 3 秒确认进程稳定后才进入保活；App 被卸载则回到休眠态。间隔和日志配置均有安全上下限，超长数字在整数比较前即被截断到最大值。已完成 shell 语法、LF/无 BOM、固定归档结构、源码/归档一致性及风险修复内容检查，按用户要求不做真机验证。
 
 官方更新后重点检查 `ExposeService` 和 `StatusService` 组件名/启动契约、设置文件位置以及目标包名是否变化。无需跟踪 APK 输出路径、签名或 Gradle flavor。
 
