@@ -2,7 +2,6 @@ package li.songe.gkd.shizuku
 
 import android.app.IActivityTaskManager
 import android.os.IUserManager
-import android.view.IWindowManager
 import li.songe.gkd.util.LogUtils
 import java.lang.reflect.Method
 
@@ -31,23 +30,6 @@ object HiddenApiType {
         )
     }
 
-    // https://diff.songe.li/i/IWindowManager.thawRotation
-    val thawRotation by lazy {
-        IWindowManager::class.java.detectHiddenMethod(
-            "thawRotation",
-            1 to emptyList(),
-            2 to listOf(String::class.java),
-        )
-    }
-
-    // https://diff.songe.li/i/IWindowManager.freezeRotation
-    val freezeRotation by lazy {
-        IWindowManager::class.java.detectHiddenMethod(
-            "freezeRotation",
-            1 to listOf(Int::class.java),
-            2 to listOf(Int::class.java, String::class.java),
-        )
-    }
 }
 
 

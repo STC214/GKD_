@@ -20,14 +20,9 @@ import rikka.shizuku.Shizuku
 
 // https://diff.songe.li/i/UiAutomationConnection
 class ProxyUiAutomationConnection : IUiAutomationConnection.Stub() {
-    companion object {
-        private const val INITIAL_FROZEN_ROTATION_UNSPECIFIED = -1
-    }
-
     private val mLock = Any()
     private val mToken = Binder()
     private var mClient: IAccessibilityServiceClient? = null
-    private var mInitialFrozenRotation = INITIAL_FROZEN_ROTATION_UNSPECIFIED
     private var mIsShutdown = false
     private var mOwningUid = 0
     private val mWindowManager
@@ -49,7 +44,6 @@ class ProxyUiAutomationConnection : IUiAutomationConnection.Stub() {
             }
             mOwningUid = Shizuku.getUid() // Binder.getCallingUid()
             registerUiTestAutomationServiceLocked(client, currentUserId, flags)
-            storeRotationStateLocked()
         }
     }
 
@@ -63,7 +57,6 @@ class ProxyUiAutomationConnection : IUiAutomationConnection.Stub() {
             }
             mOwningUid = -1
             unregisterUiTestAutomationServiceLocked()
-            restoreRotationStateLocked()
         }
     }
 
@@ -259,35 +252,6 @@ class ProxyUiAutomationConnection : IUiAutomationConnection.Stub() {
     private fun unregisterUiTestAutomationServiceLocked() {
         manager.unregisterUiTestAutomationService(mClient)
         mClient = null
-    }
-
-    private fun storeRotationStateLocked() {
-        try {
-            if (mWindowManager.isRotationFrozen()) {
-                mInitialFrozenRotation = mWindowManager.getDefaultDisplayRotation()
-            }
-        } catch (_: RemoteException) {
-        }
-    }
-
-    private fun restoreRotationStateLocked() {
-        try {
-            if (mInitialFrozenRotation != INITIAL_FROZEN_ROTATION_UNSPECIFIED) {
-                when (HiddenApiType.freezeRotation) {
-                    1 -> mWindowManager.freezeRotation(mInitialFrozenRotation)
-                    2 -> mWindowManager.freezeRotation(
-                        mInitialFrozenRotation,
-                        "UiAutomationConnection#restoreRotationStateLocked"
-                    )
-                }
-            } else {
-                when (HiddenApiType.thawRotation) {
-                    1 -> mWindowManager.thawRotation()
-                    2 -> mWindowManager.thawRotation("UiAutomationConnection#restoreRotationStateLocked")
-                }
-            }
-        } catch (_: RemoteException) {
-        }
     }
 
     private fun throwIfShutdownLocked() {

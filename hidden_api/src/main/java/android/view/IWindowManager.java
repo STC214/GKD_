@@ -7,7 +7,6 @@ import android.os.IInterface;
 import android.window.ScreenCapture;
 import android.window.ScreenCaptureInternal;
 
-import androidx.annotation.DeprecatedSinceApi;
 import androidx.annotation.RequiresApi;
 
 /**
@@ -19,24 +18,6 @@ public interface IWindowManager extends IInterface {
             throw new RuntimeException();
         }
     }
-
-    boolean isRotationFrozen();
-
-    int getDefaultDisplayRotation();
-
-    // https://diff.songe.li/i/IWindowManager.freezeRotation
-    @DeprecatedSinceApi(api = Build.VERSION_CODES.VANILLA_ICE_CREAM)
-    void freezeRotation(int rotation);
-
-    // @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-    void freezeRotation(int rotation, String caller);
-
-    // https://diff.songe.li/i/IWindowManager.thawRotation
-    @DeprecatedSinceApi(api = Build.VERSION_CODES.VANILLA_ICE_CREAM)
-    void thawRotation();
-
-    // @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-    void thawRotation(String caller);
 
     // https://diff.songe.li/i/IWindowManager.captureDisplay
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
