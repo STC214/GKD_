@@ -24,6 +24,7 @@ load_config() {
   GKD_POLICY_REFRESH_INTERVAL=1800
   GKD_LOG_MAX_BYTES=262144
   [ -f "$CONFIG" ] && . "$CONFIG"
+  GKD_PACKAGE=li.songe.gkd
   case "$GKD_USER_ID" in
     ''|*[!0-9]*)
       log "invalid GKD_USER_ID=$GKD_USER_ID; falling back to user 0"
@@ -101,7 +102,7 @@ apply_background_policy() {
 
 start_gkd_once() {
   if ! package_installed; then
-    log "skip start: $GKD_PACKAGE is not installed; this module does not bundle or install the app"
+    log "skip start: bundled GKD package $GKD_PACKAGE is not installed for user $GKD_USER_ID"
     return 1
   fi
 

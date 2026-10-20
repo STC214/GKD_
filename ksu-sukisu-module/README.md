@@ -1,6 +1,6 @@
-# GKD KernelSU / SukiSU Ultra 纯保活模块
+# GKD KernelSU / SukiSU Ultra 内置应用模块
 
-这个目录提供一个纯保活辅助模块。GKD 必须由用户单独安装并继续作为普通 Android App 运行；模块不内置 APK，不安装、更新或卸载 GKD，不修改业务设置，也不会自动授予 App 权限或开启无障碍。
+这个目录提供一个内置 GKD APK 的模块。刷入时会为配置的 Android 用户（默认 user 0）安装 `common/gkd.apk`；卸载模块时移除同一用户下的 GKD。若设备上已有 GKD，安装器通过 `pm install -r` 执行就地更新。模块不会自动授予 App 权限或开启无障碍。
 
 模块只做以下事情：
 
@@ -16,19 +16,19 @@
 ## 文件结构
 
 - `module/module.prop`：模块元信息；打包时写入分钟级版本号。
-- `module/customize.sh`：提示纯保活边界并设置脚本权限。
+- `module/customize.sh`：安装内置 APK、校验安装结果并设置脚本权限。
 - `module/service.sh`：开机启动、后台策略和低频保活守护。
 - `module/action.sh`：显示状态和日志，并打开已安装的 GKD。
-- `module/uninstall.sh`：移除模块时恢复后台 AppOps 并清理电池白名单，不卸载 GKD。
+- `module/uninstall.sh`：移除模块时卸载 GKD，并恢复后台 AppOps、清理电池白名单。
 - `module/config.conf`：保活配置。
 - `module/skip_mount`：声明不 overlay 系统文件。
-- `scripts/package-ksu-module.ps1`：Windows 打包脚本。
+- `scripts/package-ksu-module.ps1`：Windows 打包脚本，默认取用 release APK，也支持 `-ApkPath`。
 
-ZIP 中不得出现 `.apk` 文件或 `common/gkd.apk`。打包脚本会对此进行硬校验。
+ZIP 必须包含且只包含 `common/gkd.apk` 这一 APK 条目；打包脚本会对此进行硬校验。
 
-## 前置条件
+## 打包前置条件
 
-刷入模块前，请自行安装包名为 `li.songe.gkd` 的 GKD。模块检测不到该包时只写日志并等待，不会下载或安装任何内容。
+先构建项目的 GKD release APK，默认路径为 `app/build/outputs/apk/gkd/release/app-gkd-release.apk`。也可使用 `-ApkPath <路径>` 指定另一个 APK；包名须为 `li.songe.gkd`，签名须与设备上已有版本兼容。
 
 通知权限、无障碍、Root 增强和其他业务权限均由用户在 GKD 或系统设置中管理。
 
@@ -46,7 +46,7 @@ ZIP 中不得出现 `.apk` 文件或 `common/gkd.apk`。打包脚本会对此进
 ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
 ```
 
-打包过程不运行 Gradle，也不需要 `-ApkPath` 或 `-SkipBuild`。
+打包脚本本身不运行 Gradle；它把 release APK 放入模块 ZIP 的 `common/gkd.apk`。
 
 ## 配置
 
@@ -72,7 +72,7 @@ GKD_LOG_MAX_BYTES=262144
 - `GKD_POLICY_REFRESH_INTERVAL=1800`：重新应用后台 AppOps 和电池白名单的间隔，限制为 300～604800。
 - `GKD_LOG_MAX_BYTES=262144`：日志超过该大小后保留最近约 1000 行，限制为 4096～10485760；非法值回退为 262144。
 
-守护读取 GKD 保存的 `enableStatusService` 设置，只在用户已开启常驻通知时恢复对应服务。无法读取设置时只维持已经运行的服务，不会覆盖用户在 App 内主动关闭的状态。
+守护读取 GKD 保存的 `enableStatusService` 设置，只在用户已开启常驻通知时恢复对应服务。读取失败时只维持已经运行的服务，不覆盖用户在 App 内主动关闭的状态。
 
 ## 模块动作按钮
 
@@ -83,11 +83,11 @@ GKD_LOG_MAX_BYTES=262144
 - 打开 GKD 的命令结果；
 - 最近 20 行 `service.log`。
 
-如果 GKD 尚未安装，执行页会明确提示用户单独安装并退出，不会尝试安装 APK。
+如果 GKD 尚未安装，执行页会提示对应 Android 用户重新安装模块以恢复内置 App。
 
 ## 卸载行为
 
-移除模块时把模块设置的两个后台 AppOps 恢复为系统默认，并删除模块添加的电池白名单。GKD App、App 数据、无障碍设置和 App 权限均保持不变。
+移除模块时把模块设置的两个后台 AppOps 恢复为系统默认、删除模块添加的电池白名单，并卸载安装时记录的 Android 用户下的 GKD。GKD 应用数据按 Android 系统卸载行为处理；其他用户下的实例不受影响。
 
 ## 日志排障
 
@@ -99,7 +99,7 @@ su -c "tail -120 /data/adb/modules/gkd_ksu_sukisu/service.log"
 
 常见提示：
 
-- `is not installed`：需要用户单独安装 GKD；模块只会低频休眠并重新检查。
+- `is not installed`：检查模块安装时的 APK 安装结果和目标 Android 用户；模块会低频等待并重新检查。
 - `start expose service failed`：检查 GKD 是否被系统限制启动，以及当前 APK 是否仍包含 `.service.ExposeService`。
 - `startup not confirmed`：启动尚未稳定确认；模块使用从 2 秒递增、最高 30 秒的退避持续重试，直到进程连续存在 3 秒或 App 被卸载。
 - `appops ... failed`：厂商 ROM 不支持对应 AppOp 或系统服务尚未就绪；守护会在下一个策略刷新周期重试。

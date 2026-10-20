@@ -172,12 +172,12 @@ git diff --name-status "$base..HEAD"
 | `ksu-sukisu-module/README.md` | `CURRENT` 新增 | 模块文档 | 低 | 与模块实际行为同步 |
 | `module/action.sh` | `CURRENT` 新增 | 模块动作页 | 低 | 模块存在时独立维护 |
 | `module/config.conf` | `CURRENT` 新增 | 模块配置 | 低 | 默认值与 `service.sh` 一致 |
-| `module/customize.sh` | `CURRENT` 新增 | 模块初始化 | 低 | 提示纯保活边界并设置权限 |
+| `module/customize.sh` | `CURRENT` 新增 | 模块初始化 | 低 | 安装内置 APK、校验包并记录目标用户 |
 | `module/module.prop` | `CURRENT` 新增 | 模块元数据 | 低 | 打包时生成版本，不手工信任旧值 |
 | `module/service.sh` | `CURRENT` 新增 | 模块启动/守护 | 中 | 真机和 ZIP 共同验证 |
 | `module/skip_mount` | `CURRENT` 新增 | 模块标记 | 低 | 保留空标记文件 |
-| `module/uninstall.sh` | `CURRENT` 新增 | 模块卸载 | 低 | 恢复后台 AppOps、清理电池白名单，不卸载 App |
-| `package-ksu-module.ps1` | `CURRENT` 新增 | 模块打包 | 低 | 不构建或打包 APK，校验归档无 `.apk` |
+| `module/uninstall.sh` | `CURRENT` 新增 | 模块卸载 | 低 | 移除记录用户下的 GKD，恢复后台 AppOps 并清理电池白名单 |
+| `package-ksu-module.ps1` | `CURRENT` 新增 | 模块打包 | 低 | 收纳 release APK 并校验归档 APK 条目 |
 
 以下工作区文档尚未属于上述已提交差异：
 
@@ -377,7 +377,7 @@ rawPicture/fallback Bitmap
 
 ### 8.1 定位
 
-当前 `ksu-sukisu-module/` 是已安装普通 APK 的纯保活辅助，不替代规则引擎，也不承担 Root 加强版 App 的安装、更新或权限配置。
+当前 `ksu-sukisu-module/` 是内置 GKD APK 的保活模块，不替代规则引擎，也不负责 App 权限配置。
 
 它当前负责：
 
@@ -390,7 +390,7 @@ rawPicture/fallback Bitmap
 - 在模块执行页展示状态和日志；
 - 卸载模块时恢复模块设置的后台 AppOps 并清理电池白名单，始终保留 App、App 权限和数据。
 
-模块 ZIP 不包含 APK。目标 App 未安装时仅记录并等待用户自行安装，不下载、不安装、不更新任何包；通知权限、无障碍、Root 增强和业务设置均由 App/系统界面管理。
+模块 ZIP 包含 `common/gkd.apk`。安装时为 `GKD_USER_ID` 指定用户安装/就地更新，卸载时移除安装标记记录的用户实例。通知权限、无障碍、Root 增强和业务设置仍由 App/系统界面管理。
 
 ### 8.2 配置契约
 
@@ -414,19 +414,19 @@ rg -n "GKD_[A-Z_]+" ksu-sukisu-module README.md CHANGELOG.md
 
 `package-ksu-module.ps1` 当前：
 
-- 不执行 Gradle，也不接受 APK 路径；
+- 不执行 Gradle；默认取 release APK，也接受 `-ApkPath`；
 - 使用分钟级时间戳写入模块版本；
-- 只打包 `module/` 模板内容；
-- 重新打开 ZIP，拒绝反斜杠路径和任何 `.apk` 条目；
+- 打包 `module/` 模板及唯一 APK 条目 `common/gkd.apk`；
+- 重新打开 ZIP，拒绝反斜杠路径，并要求恰有该 APK 条目；
 - 输出 `ksu-sukisu-module/dist/gkd-ksu-sukisu-module.zip`。
 
-2026-07-18 风险收口后的纯保活产物版本为 `202607182357`，ZIP 共 7 个根级文件、无 APK，SHA-256 为 `5262C4697171D9E420F5A902F85B6305E13EF17AA8BA640C74B76F2241F9C22E`。所有包、进程、服务、AppOps 和设置读取统一使用 `GKD_USER_ID`，进程按目标包 UID 识别。开机和系统服务均持续等待；目标用户未安装 GKD 时按保活间隔休眠，已安装时以 2 秒递增、最高 30 秒的退避持续拉起，连续 3 秒确认进程稳定后才进入保活；App 被卸载则回到休眠态。间隔和日志配置均有安全上下限，超长数字在整数比较前即被截断到最大值。已完成 shell 语法、LF/无 BOM、固定归档结构、源码/归档一致性及风险修复内容检查，按用户要求不做真机验证。
+2026-07-18 的纯保活基线版本为 `202607182357`，ZIP 无 APK。后续按用户需求扩展为内置 APK 分发；保活仍采用统一目标用户、稳定进程确认和有界间隔策略。当前安装/卸载和归档校验见 `.codex/artifacts/module-bundled-app-20261020/verification_record.txt`。
 
-官方更新后重点检查 `ExposeService` 和 `StatusService` 组件名/启动契约、设置文件位置以及目标包名是否变化。无需跟踪 APK 输出路径、签名或 Gradle flavor。
+官方更新后重点检查 `ExposeService` 和 `StatusService` 组件名/启动契约、设置文件位置、目标包名、APK 输出路径及签名兼容性。
 
 ### 8.4 RootService 完成后的去留决策
 
-RootService 已稳定后，模块收缩为纯保活并继续维持 `CURRENT`。后续仅在 App 自身可以稳定抵抗目标 ROM 后台清理并完成长测时，才考虑完全退役模块；不得重新加入 APK、自动授权或无障碍写入来绕过 App 的用户授权边界。
+RootService 已稳定后，模块当前采用“内置 APK + 保活”分发形态。模块不自动授予权限或开启无障碍；后续若调整安装/卸载边界，应同步更新模块钩子、包校验和回滚记录。
 
 ## 9. 规划中的 Root 加强版代码差异地图
 

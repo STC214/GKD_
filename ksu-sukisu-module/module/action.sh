@@ -6,11 +6,12 @@ LOG="$MODDIR/service.log"
 GKD_PACKAGE=li.songe.gkd
 GKD_USER_ID=0
 [ -f "$CONFIG" ] && . "$CONFIG"
+GKD_PACKAGE=li.songe.gkd
 case "$GKD_USER_ID" in
   ''|*[!0-9]*) GKD_USER_ID=0 ;;
 esac
 
-echo "GKD KernelSU/SukiSU Keepalive Helper"
+echo "GKD KernelSU/SukiSU Bundle + Keepalive Module"
 echo "Module path: $MODDIR"
 echo "Package: $GKD_PACKAGE"
 echo "Android user: $GKD_USER_ID"
@@ -20,7 +21,7 @@ if pm path --user "$GKD_USER_ID" "$GKD_PACKAGE" >/dev/null 2>&1; then
   echo "GKD app: installed"
 else
   echo "GKD app: not installed"
-  echo "This module does not bundle or install GKD. Install the app separately."
+  echo "The bundled GKD package is not installed for user $GKD_USER_ID. Reinstall this module to restore it."
   exit 1
 fi
 

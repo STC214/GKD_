@@ -1,5 +1,6 @@
 param(
-    [string]$OutputPath
+    [string]$OutputPath,
+    [string]$ApkPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,12 +8,23 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $moduleRoot = Resolve-Path (Join-Path $scriptDir "..")
 $templateDir = Join-Path $moduleRoot "module"
+$repoRoot = Resolve-Path (Join-Path $moduleRoot "..")
 $workDir = Join-Path $moduleRoot "work"
 $stagingDir = Join-Path $workDir "gkd_ksu_sukisu"
 $distDir = Join-Path $moduleRoot "dist"
 
 if (-not $OutputPath) {
     $OutputPath = Join-Path $distDir "gkd-ksu-sukisu-module.zip"
+}
+if (-not $ApkPath) {
+    $ApkPath = Join-Path $repoRoot "app\build\outputs\apk\gkd\release\app-gkd-release.apk"
+}
+$ApkPath = [System.IO.Path]::GetFullPath($ApkPath)
+if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf)) {
+    throw "Release APK not found: $ApkPath. Build the GKD release APK or pass -ApkPath."
+}
+if ((Get-Item -LiteralPath $ApkPath).Length -lt 1024) {
+    throw "Release APK is unexpectedly small: $ApkPath"
 }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputParent = Split-Path -Parent $OutputPath
@@ -22,6 +34,8 @@ New-Item -ItemType Directory -Path $stagingDir | Out-Null
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 New-Item -ItemType Directory -Path $outputParent -Force | Out-Null
 Copy-Item -Path (Join-Path $templateDir "*") -Destination $stagingDir -Recurse -Force
+New-Item -ItemType Directory -Path (Join-Path $stagingDir "common") -Force | Out-Null
+Copy-Item -LiteralPath $ApkPath -Destination (Join-Path $stagingDir "common\gkd.apk") -Force
 
 # Android module scripts must use LF and must not contain a UTF-8 BOM.
 Get-ChildItem -LiteralPath $stagingDir -Recurse -File |
@@ -68,14 +82,15 @@ try {
     if ($badEntry) {
         throw "Invalid zip entry path contains backslash: $($badEntry.FullName)"
     }
-    $apkEntry = $entries | Where-Object { $_.FullName -match '(?i)\.apk$' } | Select-Object -First 1
-    if ($apkEntry) {
-        throw "Keepalive-only module must not contain an APK: $($apkEntry.FullName)"
+    $apkEntries = @($entries | Where-Object { $_.FullName -match '(?i)\.apk$' })
+    if ($apkEntries.Count -ne 1 -or $apkEntries[0].FullName -ne "common/gkd.apk") {
+        throw "Expected exactly common/gkd.apk in module, found: $(($apkEntries.FullName -join ', '))"
     }
     $expectedEntries = @(
         "action.sh",
         "config.conf",
         "customize.sh",
+        "common/gkd.apk",
         "module.prop",
         "service.sh",
         "skip_mount",
@@ -92,5 +107,5 @@ finally {
     $zipCheck.Dispose()
 }
 
-Write-Host "Packaged keepalive-only module: $OutputPath"
-Write-Host "Bundled APK: none"
+Write-Host "Packaged GKD bundle module: $OutputPath"
+Write-Host "Bundled APK: common/gkd.apk ($((Get-Item -LiteralPath $ApkPath).Length) bytes)"

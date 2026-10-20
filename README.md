@@ -28,7 +28,7 @@
 
 ## KernelSU / SukiSU Ultra 模块
 
-本 fork 额外提供一个纯保活模块：GKD 需要由用户单独安装，模块不内置、不安装、不更新也不卸载 APK，不自动授予 App 权限或开启无障碍。手机开机或重启后，模块持续等待系统服务就绪，再检查指定 Android 用户是否安装 GKD：未安装则按默认 5 分钟间隔休眠，已安装则使用最高 30 秒退避持续后台拉起，直到连续 3 秒确认目标 UID 进程稳定存在，之后才进入保活循环。模块同时设置后台运行 AppOps 和电池白名单，并依据同一用户下 GKD 保存的常驻通知开关决定是否恢复该服务。
+本 fork 额外提供一个内置 GKD APK 的 KernelSU / SukiSU Ultra 模块：刷入时将 APK 安装到配置的 Android 用户（默认 user 0），移除模块时卸载该用户下的 GKD。模块不会自动授予 App 权限或开启无障碍。手机开机或重启后，模块等待系统服务就绪，再检查 GKD 进程并按需拉起；也设置后台运行 AppOps 和电池白名单。
 
 Android 工程现已直接位于仓库根目录，不再使用额外的 `GKD_/` 嵌套目录。`app/`、`gradle/`、`selector/`、`hidden_api/` 和 `ksu-sukisu-module/` 均可从仓库根目录直接访问，本文后续命令也都以仓库根目录为当前目录。
 
@@ -44,13 +44,13 @@ Android 工程现已直接位于仓库根目录，不再使用额外的 `GKD_/` 
 ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
 ```
 
-模块版本号使用打包时的分钟级时间戳；目标 Android 用户、守护间隔、后台策略刷新周期、日志上限和保活开关均可配置。移除模块时恢复模块设置的后台 AppOps 并清理电池白名单，GKD App、权限和数据保持不变。刷入后如需调整，可编辑：
+模块版本号使用打包时的分钟级时间戳；APK 从 `app/build/outputs/apk/gkd/release/app-gkd-release.apk` 取用，也可通过 `-ApkPath` 指定。安装和卸载目标用户可在配置中调整。移除模块时卸载 GKD（该用户下的 App 数据也会随系统卸载处理），并恢复后台 AppOps、清理电池白名单。刷入后如需调整，可编辑：
 
 ```text
 /data/adb/modules/gkd_ksu_sukisu/config.conf
 ```
 
-打包过程不运行 Gradle，ZIP 内不包含 APK，并会在生成后硬校验不存在 `.apk` 条目。详细配置和日志说明见 [`ksu-sukisu-module/README.md`](ksu-sukisu-module/README.md)。
+先构建 release APK，再运行打包命令；ZIP 内含 `common/gkd.apk`，打包脚本会校验 APK 条目。详细配置和日志说明见 [`ksu-sukisu-module/README.md`](ksu-sukisu-module/README.md)。
 
 ## 项目目录
 
@@ -60,7 +60,7 @@ docs/                   本 fork 的设计与实施文档
 gradle/                 Gradle Wrapper 配置
 hidden_api/             Android 隐藏 API 声明
 selector/               GKD 选择器模块
-ksu-sukisu-module/      KernelSU/SukiSU 纯保活模块
+ksu-sukisu-module/      内置 GKD APK 的 KernelSU/SukiSU 保活模块
 local-assets/           本机辅助资料，不纳入 Git
   packages/             LSPosed、Sui 等第三方安装包
   device/               设备专用配置

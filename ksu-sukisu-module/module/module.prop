@@ -1,6 +1,6 @@
 id=gkd_ksu_sukisu
-name=GKD KernelSU/SukiSU Keepalive
+name=GKD KernelSU/SukiSU Bundle + Keepalive
 version=202607121040
 versionCode=607121040
 author=STC214
-description=Keeps an already installed GKD process alive with low-frequency checks. Does not bundle, install, grant app permissions, or uninstall the app.
+description=Bundles and installs GKD; removes it on module uninstall and keeps it alive with low-frequency checks.
