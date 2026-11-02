@@ -1,6 +1,7 @@
 param(
     [string]$OutputPath,
-    [string]$ApkPath
+    [string]$ApkPath,
+    [string]$ExpectedApkSha256
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,9 +27,17 @@ if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf)) {
 if ((Get-Item -LiteralPath $ApkPath).Length -lt 1024) {
     throw "Release APK is unexpectedly small: $ApkPath"
 }
+$apkSha256 = (Get-FileHash -LiteralPath $ApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($ExpectedApkSha256 -and $apkSha256 -ne $ExpectedApkSha256.ToLowerInvariant()) {
+    throw "APK SHA256 mismatch: expected $ExpectedApkSha256, got $apkSha256"
+}
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputParent = Split-Path -Parent $OutputPath
 
+$expectedWorkDir = [System.IO.Path]::GetFullPath((Join-Path $moduleRoot "work"))
+if ([System.IO.Path]::GetFullPath($workDir) -ne $expectedWorkDir) {
+    throw "Unexpected staging cleanup path: $workDir"
+}
 Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $stagingDir | Out-Null
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
@@ -86,6 +95,13 @@ try {
     if ($apkEntries.Count -ne 1 -or $apkEntries[0].FullName -ne "common/gkd.apk") {
         throw "Expected exactly common/gkd.apk in module, found: $(($apkEntries.FullName -join ', '))"
     }
+    $apkStream = $apkEntries[0].Open()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bundledHash = [System.BitConverter]::ToString($sha256.ComputeHash($apkStream)).Replace('-', '').ToLowerInvariant()
+        if ($bundledHash -ne $apkSha256) { throw "Bundled APK hash differs from input APK" }
+    }
+    finally { $apkStream.Dispose(); $sha256.Dispose() }
     $expectedEntries = @(
         "action.sh",
         "config.conf",
@@ -109,3 +125,4 @@ finally {
 
 Write-Host "Packaged GKD bundle module: $OutputPath"
 Write-Host "Bundled APK: common/gkd.apk ($((Get-Item -LiteralPath $ApkPath).Length) bytes)"
+Write-Host "Bundled APK SHA256: $apkSha256"
