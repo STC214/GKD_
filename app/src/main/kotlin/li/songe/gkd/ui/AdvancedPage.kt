@@ -62,6 +62,7 @@ import li.songe.gkd.permission.notificationState
 import li.songe.gkd.permission.requiredPermission
 import li.songe.gkd.permission.shizukuGrantedState
 import li.songe.gkd.root.RootServiceClient
+import kotlinx.coroutines.launch
 import li.songe.gkd.root.RootServiceState
 import li.songe.gkd.runtime.diagnostics.decisionTraceBuffer
 import li.songe.gkd.service.ActivityService
@@ -465,6 +466,21 @@ fun AdvancedPage() {
                 checked = store.enableApkRoot,
                 onCheckedChange = mainVm::switchEnableApkRoot,
                 onClick = null,
+            )
+            val nodeScopeStatus by li.songe.gkd.root.NodeScopeSetup.status.collectAsState()
+            SettingItem(
+                title = "批量配置主用户作用域",
+                subtitle = "$nodeScopeStatus。后续跳过由 GKD 黑白名单控制，新装应用可点此补齐。",
+                onClick = {
+                    li.songe.gkd.appScope.launch {
+                        li.songe.gkd.root.NodeScopeSetup.requestBatch()
+                    }
+                },
+            )
+            SettingItem(
+                title = "批量配置双开作用域",
+                subtitle = "只配置 XSpace（999），不重复申请主用户权限；配置页用完退出，不启动第二套匹配引擎。",
+                onClick = { li.songe.gkd.appScope.launch { li.songe.gkd.root.NodeScopeSetup.requestXSpaceBatch() } },
             )
             Row(
                 modifier = Modifier

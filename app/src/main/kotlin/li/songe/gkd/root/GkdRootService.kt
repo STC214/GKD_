@@ -13,6 +13,7 @@ import li.songe.gkd.shizuku.currentUserId
 import li.songe.gkd.shizuku.selectForegroundTaskFromRunningTasks
 
 class GkdRootService : RootService() {
+    private var nodePolicyBroker: RootNodePolicyBroker? = null
     private val inputManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         SafeInputManager.newRootBinder()
     }
@@ -46,6 +47,50 @@ class GkdRootService : RootService() {
     }
 
     private val binder = object : IRootService.Stub() {
+        override fun publishNodePolicy(enabled: Boolean, excluded: Array<String>, allowed: Array<String>) {
+            enforceTrustedCaller()
+            if (excluded.size > 4096 || allowed.size > 4096) throw IllegalArgumentException("Too many policy entries")
+            nodePolicyBroker?.publish(enabled, excluded.toSet(), allowed.toSet() - nodeBridgeProtectedPackages)
+        }
+
+        override fun requestXSpaceScopeSetup(): Boolean {
+            enforceTrustedCaller()
+            val candidates = getNodeScopePackages(999) ?: return false
+            // A libsu root process is not an AMS-registered ApplicationThread. Use
+            // Android's native activity shell entry instead of Context.startActivityAsUser.
+            return runCatching {
+                val command = ProcessBuilder("/system/bin/cmd", "activity", "start-activity",
+                    "--user", "999", "-n", "$packageName/.root.NodeScopeSetupActivity",
+                    "--esal", "nodeScopeCandidates", candidates.joinToString(","))
+                    .redirectErrorStream(true).start()
+                val output = command.inputStream.bufferedReader().use { it.readText() }
+                val status = command.waitFor()
+                if (status != 0 || output.contains("Error:")) {
+                    android.util.Log.w("GKD-Scope", "XSpace setup exit=$status: $output")
+                    false
+                } else true
+            }.onFailure { android.util.Log.w("GKD-Scope", "XSpace setup start failed", it) }.getOrDefault(false)
+        }
+
+        override fun getNodeScopePackages(userId: Int): Array<String>? {
+            enforceTrustedCaller()
+            require(userId == 0 || userId == 999)
+            return runCatching {
+                val command = ProcessBuilder("/system/bin/cmd", "package", "list", "packages", "-3", "--user", userId.toString())
+                    .redirectErrorStream(true).start()
+                val lines = command.inputStream.bufferedReader().readLines()
+                val status = command.waitFor()
+                if (status != 0) {
+                    android.util.Log.w("GKD-Scope", "Inventory failed user=$userId exit=$status: ${lines.take(2)}")
+                    null
+                } else {
+                    val names = lines.map { it.trim() }.filter { it.startsWith("package:") }
+                        .mapTo(hashSetOf()) { it.removePrefix("package:") }
+                    nodeScopeCandidates(names).toTypedArray()
+                }
+            }.onFailure { android.util.Log.w("GKD-Scope", "Inventory unavailable user=$userId", it) }.getOrNull()
+        }
+
         override fun getProtocolVersion(): Int {
             enforceTrustedCaller()
             return ROOT_SERVICE_PROTOCOL_VERSION
@@ -112,5 +157,16 @@ class GkdRootService : RootService() {
         }
     }
 
-    override fun onBind(intent: Intent): IBinder = binder
+    override fun onBind(intent: Intent): IBinder {
+        if (nodePolicyBroker == null) {
+            nodePolicyBroker = RootNodePolicyBroker(packageManager).also { it.start() }
+        }
+        return binder
+    }
+
+    override fun onDestroy() {
+        nodePolicyBroker?.close()
+        nodePolicyBroker = null
+        super.onDestroy()
+    }
 }

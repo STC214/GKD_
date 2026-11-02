@@ -195,6 +195,14 @@ object RootServiceClient {
             .onFailure { LogUtils.d("RootService detector folder read failed", it) }.getOrNull()
     }
 
+    fun publishNodePolicy(enabled: Boolean, excluded: Set<String>, allowed: Set<String>) {
+        remoteService?.publishNodePolicy(enabled, excluded.toTypedArray(), allowed.toTypedArray())
+    }
+
+    fun requestXSpaceScopeSetup(): Boolean = remoteService?.requestXSpaceScopeSetup() == true
+
+    fun getNodeScopePackages(userId: Int): Set<String>? = remoteService?.getNodeScopePackages(userId)?.toSet()
+
     private fun releaseBinding() {
         val connection = activeConnection
         activeConnection = null

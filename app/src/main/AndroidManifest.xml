@@ -51,6 +51,11 @@
             android:value="${tagName}" />
 
         <activity
+            android:name=".root.NodeScopeSetupActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".MainActivity"
             android:enableOnBackInvokedCallback="false"
             android:exported="true"

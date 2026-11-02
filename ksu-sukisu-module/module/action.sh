@@ -15,6 +15,11 @@ echo "GKD KernelSU/SukiSU Bundle + Keepalive Module"
 echo "Module path: $MODDIR"
 echo "Package: $GKD_PACKAGE"
 echo "Android user: $GKD_USER_ID"
+if pm list packages --user 999 "$GKD_PACKAGE" 2>/dev/null | grep -Fxq "package:$GKD_PACKAGE"; then
+  echo "XSpace 999: APK registered for LSPosed; engine keepalive remains user $GKD_USER_ID"
+else
+  echo "XSpace 999: no module registration"
+fi
 echo
 
 if pm path --user "$GKD_USER_ID" "$GKD_PACKAGE" >/dev/null 2>&1; then

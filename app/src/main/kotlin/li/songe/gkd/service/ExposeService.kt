@@ -72,6 +72,11 @@ class ExposeService : Service() {
                 LogUtils.d("Root node-only probe", report.toString())
             }
 
+            5 -> li.songe.gkd.root.NodeScopeSetup.requestBatch(
+                forwardedCandidates = intent?.getStringArrayListExtra("nodeScopeCandidates")?.toSet(),
+            )
+            6 -> li.songe.gkd.root.NodeScopeSetup.requestXSpaceBatch()
+
             else -> {
                 toast("未知调用: expose=$expose data=$data", forced = true)
             }

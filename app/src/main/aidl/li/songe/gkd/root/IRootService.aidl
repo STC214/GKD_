@@ -12,4 +12,7 @@ interface IRootService {
     int performInput(in RootInputRequest request) = 5;
     RootForegroundTask getForegroundTask(int displayId) = 6;
     @nullable String[] getDetectorFolderPackages() = 7;
+    void publishNodePolicy(boolean enabled, in String[] excluded, in String[] allowed) = 8;
+    boolean requestXSpaceScopeSetup() = 9;
+    @nullable String[] getNodeScopePackages(int userId) = 10;
 }

@@ -1,6 +1,6 @@
 package li.songe.gkd.root
 
-const val ROOT_SERVICE_PROTOCOL_VERSION = 3
+const val ROOT_SERVICE_PROTOCOL_VERSION = 6
 
 data class RootServiceIdentity(
     val protocolVersion: Int,

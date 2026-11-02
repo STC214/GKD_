@@ -14,6 +14,7 @@ set_perm "$MODPATH/uninstall.sh" 0 0 0755
 CONFIG="$MODPATH/config.conf"
 GKD_PACKAGE=li.songe.gkd
 GKD_USER_ID=0
+GKD_REGISTER_XSPACE_MODULE=1
 [ -f "$CONFIG" ] && . "$CONFIG"
 case "$GKD_USER_ID" in ''|*[!0-9]*) GKD_USER_ID=0 ;; esac
 GKD_PACKAGE=li.songe.gkd
@@ -34,4 +35,21 @@ if ! pm list packages --user "$GKD_USER_ID" "$GKD_PACKAGE" | grep -Fxq "package:
 fi
 mkdir -p "${MARKER%/*}"
 printf '%s\n' "$GKD_USER_ID" > "$MARKER"
+
+# Register the same APK in an existing XSpace profile for LSPosed's per-user
+# module registry. Do not launch a second GKD engine or enable its accessibility.
+if [ "$GKD_USER_ID" = 0 ] && [ "$GKD_REGISTER_XSPACE_MODULE" = 1 ] &&
+   pm list users | grep -q 'UserInfo{999:'; then
+    if ! pm list packages --user 999 "$GKD_PACKAGE" | grep -Fxq "package:$GKD_PACKAGE"; then
+        if ! cmd package install-existing --user 999 "$GKD_PACKAGE"; then
+            abort "XSpace module registration failed"
+        fi
+        if ! pm list packages --user 999 "$GKD_PACKAGE" | grep -Fxq "package:$GKD_PACKAGE"; then
+            abort "XSpace module registration verification failed"
+        fi
+        printf '999\n' > "$MARKER.xspace"
+        ui_print "- Same APK registered for XSpace 999; no second engine started"
+    fi
+    ui_print "- Enable GKD and its target scope separately in LSPosed user 999"
+fi
 ui_print "- GKD installed and verified for user $GKD_USER_ID"

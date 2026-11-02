@@ -30,3 +30,17 @@ if [ -f "$MARKER" ]; then
     rm -f "$MARKER"
   fi
 fi
+
+# Remove only an XSpace registration created and recorded by this installer.
+# Pre-existing user-999 GKD installations are never claimed by this sidecar.
+if [ -f "$MARKER.xspace" ] && [ "$(cat "$MARKER.xspace")" = 999 ]; then
+  if pm list packages --user 999 "$GKD_PACKAGE" | grep -Fxq "package:$GKD_PACKAGE"; then
+    if pm uninstall --user 999 "$GKD_PACKAGE" >/dev/null 2>&1; then
+      rm -f "$MARKER.xspace"
+    else
+      echo "GKD XSpace unregister failed; ownership marker retained" >&2
+    fi
+  else
+    rm -f "$MARKER.xspace"
+  fi
+fi
