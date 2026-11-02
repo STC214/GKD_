@@ -189,6 +189,12 @@ object RootServiceClient {
         }
     }
 
+    fun getDetectorFolderPackages(): Set<String>? {
+        val service = remoteService ?: return null
+        return runCatching { service.detectorFolderPackages?.toSet() }
+            .onFailure { LogUtils.d("RootService detector folder read failed", it) }.getOrNull()
+    }
+
     private fun releaseBinding() {
         val connection = activeConnection
         activeConnection = null

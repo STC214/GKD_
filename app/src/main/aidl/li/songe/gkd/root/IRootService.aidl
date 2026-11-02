@@ -11,4 +11,5 @@ interface IRootService {
     String getServicePackageName() = 4;
     int performInput(in RootInputRequest request) = 5;
     RootForegroundTask getForegroundTask(int displayId) = 6;
+    @nullable String[] getDetectorFolderPackages() = 7;
 }

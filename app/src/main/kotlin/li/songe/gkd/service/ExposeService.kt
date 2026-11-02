@@ -48,6 +48,30 @@ class ExposeService : Service() {
                 syncFixState()
             }
 
+            4 -> {
+                // Node-only probe: deliberately does not call screenshot/captureSnapshot.
+                val root = li.songe.gkd.a11y.A11yRuleEngine.instance?.safeActiveWindow
+                val queue = java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+                if (root != null) queue.add(root)
+                var count = 0
+                var skipCandidates = 0
+                while (queue.isNotEmpty() && count < 1000) {
+                    val node = queue.removeFirst()
+                    count++
+                    if (node.text?.contains("跳过") == true || node.contentDescription?.contains("跳过") == true) skipCandidates++
+                    for (i in 0 until minOf(node.childCount, 200)) {
+                        node.getChild(i)?.let(queue::add)
+                    }
+                }
+                val report = org.json.JSONObject()
+                    .put("timestamp", System.currentTimeMillis())
+                    .put("rootPackage", root?.packageName?.toString() ?: org.json.JSONObject.NULL)
+                    .put("nodes", count).put("skipCandidates", skipCandidates)
+                    .put("screenshotsUsed", false)
+                li.songe.gkd.util.logFolder.resolve("root-node-probe.json").writeText(report.toString())
+                LogUtils.d("Root node-only probe", report.toString())
+            }
+
             else -> {
                 toast("未知调用: expose=$expose data=$data", forced = true)
             }

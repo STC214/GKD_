@@ -158,7 +158,10 @@ android {
     dependenciesInfo.includeInApk = false
     packaging.resources.excludes += setOf(
         // https://github.com/Kotlin/kotlinx.coroutines/issues/2023
-        "META-INF/**", "**/attach_hotspot_windows.dll",
+        "META-INF/versions/**", "META-INF/maven/**", "META-INF/native-image/**",
+        "META-INF/*.kotlin_module", "META-INF/AL2.0", "META-INF/LGPL2.1",
+        "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/MANIFEST.MF", "META-INF/*.version",
+        "**/attach_hotspot_windows.dll",
 
         "**.properties", "**.bin", "**/*.proto",
         "**/kotlin-tooling-metadata.json",
@@ -167,6 +170,7 @@ android {
         "**/custom.config.conf",
         "**/custom.config.yaml",
     )
+    packaging.resources.merges += "META-INF/services/**"
 }
 
 if (project.hasProperty("GKD_RENAME_APK_FLAG")) {
@@ -195,6 +199,8 @@ loc {
 }
 
 dependencies {
+    compileOnly("io.github.libxposed:api:102.0.0")
+    implementation("io.github.libxposed:service:102.0.0")
     implementation(libs.kotlin.stdlib)
 
     implementation(project(":selector"))

@@ -66,6 +66,11 @@ class GkdRootService : RootService() {
             return packageName
         }
 
+        override fun getDetectorFolderPackages(): Array<String>? {
+            enforceTrustedCaller()
+            return readDetectorFolderPackages()
+        }
+
         override fun performInput(request: RootInputRequest): Int {
             enforceTrustedCaller()
             if (validateRootInputRequest(request) != null) {

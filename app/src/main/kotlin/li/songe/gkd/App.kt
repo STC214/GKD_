@@ -240,6 +240,8 @@ class App : Application() {
         }
         initToast()
         initStore()
+        li.songe.gkd.store.initDetectorFolderPolicy()
+        li.songe.gkd.root.initRootNodeBridgePolicy()
         initRootServiceLifecycle()
         initChannel()
         initAppState()

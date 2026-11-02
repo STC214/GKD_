@@ -8,6 +8,7 @@ import li.songe.gkd.ui.gkdStartCommandText
 import li.songe.gkd.util.AppListString
 import li.songe.gkd.util.launchTry
 import li.songe.gkd.util.toast
+import li.songe.gkd.root.detectorFolderSeedPackages
 
 val storeFlow by lazy {
     createAnyFlow(
@@ -27,7 +28,7 @@ val actionCountFlow by lazy {
 val blockMatchAppListFlow by lazy {
     createTextFlow(
         key = "block_match_app_list",
-        decode = { it?.let(AppListString::decode) ?: AppListString.getDefaultBlockList() },
+        decode = { (it?.let(AppListString::decode) ?: AppListString.getDefaultBlockList()) + detectorFolderSeedPackages },
         encode = AppListString::encode,
     )
 }
@@ -41,11 +42,11 @@ val blockA11yAppListFlow by lazy {
 }
 
 val actualBlockA11yAppList: Set<String>
-    get() = if (storeFlow.value.blockA11yAppListFollowMatch) {
+    get() = (if (storeFlow.value.blockA11yAppListFollowMatch) {
         blockMatchAppListFlow.value
     } else {
         blockA11yAppListFlow.value
-    }
+    }) + detectorFolderPackagesFlow.value
 
 val a11yScopeAppListFlow by lazy {
     createTextFlow(
@@ -63,6 +64,7 @@ val actualA11yScopeAppList: Set<String>
     }
 
 fun checkAppBlockMatch(appId: String): Boolean {
+    if (appId in detectorFolderPackagesFlow.value) return true
     if (blockMatchAppListFlow.value.contains(appId)) {
         return true
     }
