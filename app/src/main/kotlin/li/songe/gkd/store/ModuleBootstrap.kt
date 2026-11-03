@@ -30,7 +30,10 @@ fun initModuleBootstrap() {
     if (Process.myUid() / 100000 != 0 ||
         runCatching { app.filesDir.resolve("module_bootstrap_v1").readText().trim() }.getOrNull() != "1") return
     val attempted = app.filesDir.resolve("module_scope_requested_v1")
-    if (attempted.exists() || !storeFlow.value.enableApkRoot || !storeFlow.value.enableAutomator) return
+    val alreadyRequested = runCatching {
+        AtomicFile(attempted).openRead().bufferedReader().use { it.readText() } == "1"
+    }.getOrDefault(false)
+    if (alreadyRequested || !storeFlow.value.enableApkRoot || !storeFlow.value.enableAutomator) return
     appScope.launch(Dispatchers.IO) {
         try {
             val ready = withTimeoutOrNull(60_000L) {

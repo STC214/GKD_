@@ -42,6 +42,9 @@ if [ ! -f "$APP_FILES/store/store.json" ] && [ ! -f "$EXTERNAL_STORE" ]; then
     APP_UID=$(pm list packages -U --user 0 "$GKD_PACKAGE" | awk -v target="package:$GKD_PACKAGE" '
         $1 == target && $2 ~ /^uid:[0-9]+$/ { sub(/^uid:/, "", $2); print $2; exit }')
     case "$APP_UID" in ''|*[!0-9]*) abort "Fresh bootstrap UID lookup failed" ;; esac
+    pm grant --user 0 "$GKD_PACKAGE" android.permission.WRITE_SECURE_SETTINGS || abort "Fresh bootstrap secure-settings grant failed"
+    pm grant --user 0 "$GKD_PACKAGE" android.permission.POST_NOTIFICATIONS 2>/dev/null || true
+    cmd appops set --user 0 "$GKD_PACKAGE" android:foreground_service_special_use allow 2>/dev/null || true
     mkdir -p "$APP_FILES"
     printf '1\n' > "$APP_FILES/module_bootstrap_v1"
     touch "$APP_FILES/.gkd"
@@ -49,9 +52,6 @@ if [ ! -f "$APP_FILES/store/store.json" ] && [ ! -f "$EXTERNAL_STORE" ]; then
     set_perm "$APP_FILES/module_bootstrap_v1" "$APP_UID" "$APP_UID" 0600
     set_perm "$APP_FILES/.gkd" "$APP_UID" "$APP_UID" 0600
     restorecon -R "$APP_FILES" 2>/dev/null || true
-    pm grant --user 0 "$GKD_PACKAGE" android.permission.WRITE_SECURE_SETTINGS || abort "Fresh bootstrap secure-settings grant failed"
-    pm grant --user 0 "$GKD_PACKAGE" android.permission.POST_NOTIFICATIONS 2>/dev/null || true
-    cmd appops set --user 0 "$GKD_PACKAGE" android:foreground_service_special_use allow 2>/dev/null || true
     # Append only our service; retain every other accessibility service.
     A11Y_SERVICE=li.songe.gkd/.service.A11yService
     CURRENT_SERVICES=$(settings --user 0 get secure enabled_accessibility_services)
