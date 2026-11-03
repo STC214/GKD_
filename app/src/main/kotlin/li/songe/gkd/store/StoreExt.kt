@@ -13,7 +13,7 @@ import li.songe.gkd.root.detectorFolderSeedPackages
 val storeFlow by lazy {
     createAnyFlow(
         key = "store",
-        default = { SettingsStore() }
+        default = { moduleBootstrapDefaults() }
     )
 }
 

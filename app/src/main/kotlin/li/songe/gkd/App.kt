@@ -246,6 +246,7 @@ class App : Application() {
         initShizuku()
         initSubsState()
         initA11yWhiteAppList()
+        li.songe.gkd.store.initModuleBootstrap()
         clearHttpSubs()
         syncFixState()
     }

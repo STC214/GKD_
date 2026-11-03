@@ -19,6 +19,8 @@ import li.songe.gkd.R
 import li.songe.gkd.data.BundledLocalRules
 import li.songe.gkd.data.applyBundledRulePlan
 import li.songe.gkd.data.bundledMigrationComplete
+import li.songe.gkd.data.planBundledDefaultRules
+import li.songe.gkd.data.applyBundledDefaultRules
 import android.util.AtomicFile
 import kotlinx.serialization.json.jsonObject
 import li.songe.gkd.data.AppRule
@@ -438,6 +440,8 @@ fun initSubsState() {
         updateSubsMutex.withStateLock {
             runCatching { installBundledNoticeRules() }
                 .onFailure { LogUtils.d("Bundled local notice rules failed", it) }
+            runCatching { installBundledOnlineDefaults() }
+                .onFailure { LogUtils.d("Bundled online defaults failed", it) }
             val items = DbSet.subsItemDao.queryAll()
             refreshRawSubsList(items)
         }
@@ -473,6 +477,30 @@ private suspend fun installBundledNoticeRules() {
     }, writeMarker = {
         writeAtomicText(marker, "1")
     })
+}
+
+private suspend fun installBundledOnlineDefaults() {
+    if (android.os.Process.myUid() / 100000 != 0) return
+    val id = 667L
+    val marker = storeFolder.resolve("bundled_online_667_v1.txt")
+    val completed = bundledMigrationComplete(runCatching {
+        AtomicFile(marker).openRead().bufferedReader().use { it.readText() }
+    }.getOrNull())
+    val file = subsFolder.resolve("$id.json")
+    val hasFile = file.exists() || file.resolveSibling(file.name + ".bak").exists()
+    val existing = DbSet.subsItemDao.queryAll().find { it.id == id }
+    val plan = planBundledDefaultRules(completed, existing != null, hasFile) ?: return
+    val text = if (hasFile) AtomicFile(file).openRead().bufferedReader().use { it.readText() }
+        else app.resources.openRawResource(R.raw.bundled_online_667).bufferedReader().use { it.readText() }
+    check(RawSubscription.parse(text, json5 = false).id == id) { "Bundled subscription identity mismatch" }
+    applyBundledDefaultRules(plan, metadata = {
+        DbSet.subsItemDao.insertOrIgnore(SubsItem(
+            id = id, enable = true, enableUpdate = true,
+            order = ((DbSet.subsItemDao.queryAll().maxOfOrNull { it.order } ?: -1).toLong() + 1)
+                .coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            updateUrl = "https://gkd667.vv.ax/gkd.json5",
+        ))
+    }, snapshot = { writeAtomicText(file, text) }, marker = { writeAtomicText(marker, "1") })
 }
 
 private fun writeAtomicText(file: java.io.File, text: String) {

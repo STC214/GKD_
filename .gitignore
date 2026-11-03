@@ -28,3 +28,4 @@ local.properties
 
 # Local third-party packages, diagnostics, and device-specific files
 /local-assets/
+/dist/
