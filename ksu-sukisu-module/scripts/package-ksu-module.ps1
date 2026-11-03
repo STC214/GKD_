@@ -36,6 +36,14 @@ $apkSha256 = (Get-FileHash -LiteralPath $ApkPath -Algorithm SHA256).Hash.ToLower
 if ($ExpectedApkSha256 -and $apkSha256 -ne $ExpectedApkSha256.ToLowerInvariant()) {
     throw "APK SHA256 mismatch: expected $ExpectedApkSha256, got $apkSha256"
 }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$apkCheck = [System.IO.Compression.ZipFile]::OpenRead($ApkPath)
+try {
+    if (-not $apkCheck.GetEntry("AndroidManifest.xml") -or -not $apkCheck.GetEntry("classes.dex")) {
+        throw "Input is not a packaged Android application"
+    }
+}
+finally { $apkCheck.Dispose() }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputParent = Split-Path -Parent $OutputPath
 if ([System.IO.Path]::GetExtension($OutputPath) -ne ".zip") { throw "Module output must use .zip" }
