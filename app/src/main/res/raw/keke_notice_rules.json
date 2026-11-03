@@ -1,0 +1,27 @@
+{
+  "id": -2,
+  "name": "本地订阅",
+  "version": 1,
+  "globalGroups": [
+    {
+      "key": 2026110301,
+      "name": "可可影视-关闭公告",
+      "desc": "仅点击可可影视公告中的“朕知道了”，不点击下载、跳转或协议按钮",
+      "enable": true,
+      "fastQuery": true,
+      "action": "clickNode",
+      "actionCd": 3000,
+      "matchAnyApp": true,
+      "rules": [
+        {
+          "matches": [
+            "[id=\"com.kkdyC1V260818.T150254:id/txt_title\"][text=\"可可影视\"][visibleToUser=true]",
+            "TextView[id=\"com.kkdyC1V260818.T150254:id/btn_confirm\"][text=\"朕知道了\"][clickable=true][visibleToUser=true]"
+          ]
+        }
+      ]
+    }
+  ],
+  "categories": [],
+  "apps": []
+}

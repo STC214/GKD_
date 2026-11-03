@@ -69,7 +69,7 @@ android {
     namespace = "li.songe.gkd"
     defaultConfig {
         applicationId = "li.songe.gkd"
-        versionCode = 92
+        versionCode = 93
         versionName = "1.12.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

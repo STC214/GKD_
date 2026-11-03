@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import li.songe.gkd.appScope
+import li.songe.gkd.app
+import li.songe.gkd.R
+import li.songe.gkd.data.BundledLocalRules
+import kotlinx.serialization.json.jsonObject
 import li.songe.gkd.data.AppRule
 import li.songe.gkd.data.CategoryConfig
 import li.songe.gkd.data.GlobalRule
@@ -429,10 +433,43 @@ fun initSubsState() {
     subsItemsFlow.value
     appScope.launchTry(Dispatchers.IO) {
         updateSubsMutex.withStateLock {
+            runCatching { installBundledNoticeRules() }
+                .onFailure { LogUtils.d("Bundled local notice rules failed", it) }
             val items = DbSet.subsItemDao.queryAll()
             refreshRawSubsList(items)
         }
     }
+}
+
+/** One-time owner-only migration. A later user deletion/disable is never undone on restart. */
+private suspend fun installBundledNoticeRules() {
+    if (android.os.Process.myUid() / 100000 != 0) return
+    val marker = storeFolder.resolve("bundled_keke_notice_v1.txt")
+    if (marker.exists()) return
+    val file = subsFolder.resolve("$LOCAL_SUBS_ID.json")
+    val current = json.parseToJsonElement(if (file.exists()) file.readText() else
+        """{"id":-2,"name":"本地订阅","version":0}""").jsonObject
+    val bundle = app.resources.openRawResource(R.raw.keke_notice_rules).bufferedReader().use {
+        json.parseToJsonElement(it.readText()).jsonObject
+    }
+    val plan = BundledLocalRules.merge(current, bundle)
+    if (plan.changed) {
+        // Validate using the same parser before replacing the user's file.
+        RawSubscription.parse(plan.subscription.toString(), json5 = false)
+        val temp = file.resolveSibling(file.name + ".bundled.tmp")
+        temp.writeText(plan.subscription.toString())
+        check(temp.renameTo(file)) { "Could not replace local subscription" }
+        val existing = DbSet.subsItemDao.queryAll().find { it.id == LOCAL_SUBS_ID }
+        if (existing == null) {
+            DbSet.subsItemDao.insertOrIgnore(SubsItem(
+                id = LOCAL_SUBS_ID, enable = plan.enableEmptyLocal,
+                enableUpdate = false, order = -1,
+            ))
+        } else if (plan.enableEmptyLocal && !existing.enable) {
+            DbSet.subsItemDao.updateEnable(LOCAL_SUBS_ID, true)
+        }
+    }
+    marker.writeText("1")
 }
 
 private suspend fun cleanupSubsConfig(subsId: Long, subsRaw: RawSubscription): Int {

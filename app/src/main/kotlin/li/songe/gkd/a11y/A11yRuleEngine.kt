@@ -102,9 +102,9 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         val serviceTime = System.currentTimeMillis()
         latestServiceMode.value = service.mode.value
         latestServiceTime.value = serviceTime
-        if (storeFlow.value.enableBlockA11yAppList && !actualBlockA11yAppList.contains(topAppIdFlow.value)) {
-            startQueryJob(byForced = true)
-        }
+        // A static ad may emit its only event before this replacement service connects.
+        // Bootstrap independently of the accessibility block-list feature.
+        onForegroundTaskChanged()
         runMainPost(1000L) {// 共存 1000ms, 等待另一个服务稳定
             if (latestServiceTime.value == serviceTime) {
                 when (service.mode) {
@@ -334,6 +334,24 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
 
     private val foregroundConfirmationState = ForegroundConfirmationState(150L)
     private var foregroundRetryJob: Job? = null
+    private var foregroundWakeJob: Job? = null
+
+    /** Task notifications are wake signals, not authority to click; re-confirm the window first. */
+    fun onForegroundTaskChanged() {
+        advanceWindowGeneration()
+        markWindowTransition()
+        foregroundWakeJob?.cancel()
+        foregroundWakeJob = scope.launch(actionDispatcher) {
+            // The root-hook may register shortly after the task callback; never poll forever.
+            for (waitMillis in listOf(100L, 200L, 400L, 800L, 1000L)) {
+                delay(waitMillis)
+                if (getConfirmedForeground(null, allowMissingRootRecovery = true) != null) {
+                    startQueryJob()
+                    return@launch
+                }
+            }
+        }
+    }
     private val rootMismatchRetryState = RootMismatchRetryState()
     private var rootMismatchRetryJob: Job? = null
     private val windowRootRecoveryState = WindowRootRecoveryState()
@@ -583,7 +601,9 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         // 无障碍从零启动时获取 safeActiveWindow 非常耗时
         if (byEvent == null && service.justStarted && !hasOthersService) {
             traceDecision(traceId, DecisionStage.Query, DecisionOutcome.Skipped, DecisionReason.ServiceStarting)
-            return checkFutureStartJob()
+            // Service startup and app-change clocks need not start together.
+            scope.launch(actionDispatcher) { delay(300L); startQueryJob() }
+            return
         }
         val request = QueryWakeRequest(
             event = byEvent,

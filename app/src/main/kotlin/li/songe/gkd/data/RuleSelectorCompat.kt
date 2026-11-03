@@ -8,6 +8,12 @@ package li.songe.gkd.data
  * stale selector is removed, this fallback stops being injected automatically.
  */
 internal object RuleSelectorCompat {
+    internal const val GLOBAL_SPLASH_WIDTH_SELECTOR =
+        "[text*=\"跳过\"][text.length<10][width<500 && height<300][visibleToUser=true]"
+    // Keke 3.5.0 uses a 518px-wide countdown on the tested device. Keep the generic
+    // width guard intact; only this fully-qualified ID and countdown text are accepted.
+    internal const val KEKE_SPLASH_SELECTOR =
+        "TextView[id=\"com.kkdyC1V260818.T150254:id/txt_status\"][clickable=true][visibleToUser=true][text~=\"^[0-9]{1,2}秒 点击跳过$\"]"
     internal const val MIHOYO_APP_ID = "com.mihoyo.hyperion"
     internal const val MIHOYO_STAR_RAIL_ACTION_CD = 5_000L
 
@@ -29,6 +35,9 @@ internal object RuleSelectorCompat {
     )
 
     fun resolveAnyMatchSources(appId: String?, sources: List<String>): List<String> {
+        if (appId == null && GLOBAL_SPLASH_WIDTH_SELECTOR in sources && KEKE_SPLASH_SELECTOR !in sources) {
+            return sources + KEKE_SPLASH_SELECTOR
+        }
         if (appId != MIHOYO_APP_ID) {
             return sources
         }

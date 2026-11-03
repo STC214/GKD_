@@ -75,6 +75,18 @@ class DecisionTraceBuffer(
     }
 }
 
+@Volatile
+private var temporaryTraceUntil = 0L
+
+/** Bounded, in-memory diagnostics; never changes the user's persisted setting. */
+fun startTemporaryDecisionTrace() {
+    temporaryTraceUntil = android.os.SystemClock.elapsedRealtime() + 60_000L
+    decisionTraceBuffer.clear()
+}
+
 val decisionTraceBuffer = DecisionTraceBuffer(
-    enabled = { storeFlow.value.enableRuleDiagnostics },
+    enabled = {
+        storeFlow.value.enableRuleDiagnostics ||
+                android.os.SystemClock.elapsedRealtime() < temporaryTraceUntil
+    },
 )

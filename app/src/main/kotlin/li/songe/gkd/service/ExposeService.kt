@@ -3,6 +3,9 @@ package li.songe.gkd.service
 import android.app.Service
 import android.content.Intent
 import android.os.Binder
+import li.songe.gkd.a11y.captureForegroundSnapshot
+import li.songe.gkd.runtime.diagnostics.decisionTraceBuffer
+import li.songe.gkd.runtime.diagnostics.startTemporaryDecisionTrace
 import li.songe.gkd.app
 import li.songe.gkd.appScope
 import li.songe.gkd.notif.exposeNotif
@@ -50,14 +53,25 @@ class ExposeService : Service() {
 
             4 -> {
                 // Node-only probe: deliberately does not call screenshot/captureSnapshot.
+                val diagnostics = intent?.getBooleanExtra("diagnostics", false) == true
+                if (intent?.getBooleanExtra("beginTrace", false) == true) startTemporaryDecisionTrace()
                 val root = li.songe.gkd.a11y.A11yRuleEngine.instance?.safeActiveWindow
                 val queue = java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+                val nodes = org.json.JSONArray()
                 if (root != null) queue.add(root)
                 var count = 0
                 var skipCandidates = 0
                 while (queue.isNotEmpty() && count < 1000) {
                     val node = queue.removeFirst()
                     count++
+                    val bounds = android.graphics.Rect().also(node::getBoundsInScreen)
+                    if (diagnostics) nodes.put(org.json.JSONObject()
+                        .put("id", node.viewIdResourceName).put("class", node.className?.toString())
+                        .put("text", node.text?.take(256)?.toString())
+                        .put("desc", node.contentDescription?.take(256)?.toString())
+                        .put("clickable", node.isClickable).put("visible", node.isVisibleToUser)
+                        .put("bounds", bounds.toShortString()).put("width", bounds.width()).put("height", bounds.height())
+                        .put("window", node.windowId))
                     if (node.text?.contains("跳过") == true || node.contentDescription?.contains("跳过") == true) skipCandidates++
                     for (i in 0 until minOf(node.childCount, 200)) {
                         node.getChild(i)?.let(queue::add)
@@ -70,6 +84,15 @@ class ExposeService : Service() {
                     .put("screenshotsUsed", false)
                 li.songe.gkd.util.logFolder.resolve("root-node-probe.json").writeText(report.toString())
                 LogUtils.d("Root node-only probe", report.toString())
+                if (diagnostics) {
+                    report.put("nodeDetails", nodes)
+                        .put("foreground", runCatching {
+                            li.songe.gkd.a11y.A11yRuleEngine.service?.captureForegroundSnapshot().toString()
+                        }.getOrElse { it.toString() })
+                        .put("serviceMode", li.songe.gkd.a11y.A11yRuleEngine.service?.mode?.toString())
+                    li.songe.gkd.util.logFolder.resolve("root-node-diagnostics.json").writeText(report.toString())
+                    li.songe.gkd.util.logFolder.resolve("rule-decision-probe.txt").writeText(decisionTraceBuffer.exportText())
+                }
             }
 
             5 -> li.songe.gkd.root.NodeScopeSetup.requestBatch(

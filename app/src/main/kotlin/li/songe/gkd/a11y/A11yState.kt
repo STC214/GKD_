@@ -239,6 +239,9 @@ fun updateTopActivity(
             loc = loc,
             tag = "updateTopActivity",
         )
+        if (scene == ActivityScene.TaskStack && !isSame) {
+            A11yRuleEngine.instance?.onForegroundTaskChanged()
+        }
     }
 }
 
