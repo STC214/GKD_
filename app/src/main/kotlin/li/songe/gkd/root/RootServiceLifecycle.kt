@@ -1,5 +1,6 @@
 package li.songe.gkd.root
 
+import android.os.SystemClock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -10,7 +11,7 @@ import li.songe.gkd.appScope
 import li.songe.gkd.store.storeFlow
 
 fun initRootServiceLifecycle() {
-    var automaticRetries = 0
+    val retryBudget = RootRetryBudget()
     appScope.launch {
         storeFlow
             .map { it.enableApkRoot }
@@ -19,22 +20,25 @@ fun initRootServiceLifecycle() {
                 if (enabled) {
                     RootServiceClient.connect(app)
                 } else {
-                    automaticRetries = 0
+                    retryBudget.reset()
                     RootServiceClient.disconnect()
                 }
             }
     }
     appScope.launch {
         RootServiceClient.state.collectLatest { state ->
+            if (state is RootServiceState.Connected) {
+                retryBudget.connected(SystemClock.elapsedRealtime())
+                return@collectLatest
+            }
             if (state !is RootServiceState.Failed ||
                 !state.retryable ||
-                !storeFlow.value.enableApkRoot ||
-                automaticRetries >= MAX_AUTOMATIC_ROOT_RETRIES
+                !storeFlow.value.enableApkRoot
             ) {
                 return@collectLatest
             }
-            automaticRetries += 1
-            delay(AUTOMATIC_ROOT_RETRY_DELAY_MS * automaticRetries)
+            val attempt = retryBudget.consume(SystemClock.elapsedRealtime()) ?: return@collectLatest
+            delay(AUTOMATIC_ROOT_RETRY_DELAY_MS * attempt)
             if (storeFlow.value.enableApkRoot && RootServiceClient.state.value == state) {
                 RootServiceClient.connect(app)
             }
@@ -42,5 +46,4 @@ fun initRootServiceLifecycle() {
     }
 }
 
-private const val MAX_AUTOMATIC_ROOT_RETRIES = 2
 private const val AUTOMATIC_ROOT_RETRY_DELAY_MS = 750L
