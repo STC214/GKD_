@@ -212,11 +212,11 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         LogUtils.d()
-        Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            toast(e.message ?: e.toString())
-            LogUtils.d("UncaughtExceptionHandler", t, e)
-            val mtime = System.currentTimeMillis()
-            appScope.launchTry(Dispatchers.IO) {
+        Thread.setDefaultUncaughtExceptionHandler(li.songe.gkd.util.ReportingCrashHandler(
+            previous = Thread.getDefaultUncaughtExceptionHandler(),
+            report = { t, e ->
+                LogUtils.d("UncaughtExceptionHandler", t, e)
+                val mtime = System.currentTimeMillis()
                 CrashData(
                     id = mtime,
                     mtime = mtime,
@@ -230,14 +230,11 @@ class App : Application() {
                     thread = t.name,
                     stackTrace = Log.getStackTraceString(e),
                 ).save()
-                delay(1500)
-                if (isActivityVisible) {
-                    startLaunchActivity()
-                }
+            }, terminate = {
                 android.os.Process.killProcess(android.os.Process.myPid())
-                exitProcess(0)
+                exitProcess(10)
             }
-        }
+        ))
         initToast()
         initStore()
         li.songe.gkd.store.initDetectorFolderPolicy()

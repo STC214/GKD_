@@ -24,6 +24,13 @@ class WindowGenerationStateTest {
         assertTrue(state.isCurrent(token, snapshot))
     }
 
+    @Test fun `same app task and window in another profile rejects old action`() {
+        val state = WindowGenerationState()
+        val token = state.capture(snapshot)
+        assertFalse(state.isCurrent(token, snapshot.copy(userId = 999)))
+        assertFalse(state.matchesWindowContext(token, snapshot.copy(userId = null)))
+    }
+
     @Test
     fun `window event invalidates an earlier selector token`() {
         val state = WindowGenerationState()

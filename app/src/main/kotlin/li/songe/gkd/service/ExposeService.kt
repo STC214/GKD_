@@ -17,9 +17,15 @@ import li.songe.gkd.util.launchTry
 import li.songe.gkd.util.runMainPost
 import li.songe.gkd.util.shFolder
 import li.songe.gkd.util.toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ExposeService : Service() {
     private var foregroundStarted = false
+    private var activeCommands = 0
+    private var latestStartId = 0
 
     override fun onBind(intent: Intent?): Binder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -29,11 +35,17 @@ class ExposeService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
+        latestStartId = startId
+        activeCommands++
         appScope.launchTry {
             try {
                 handleIntent(intent)
             } finally {
-                runMainPost(1000) { stopSelf() }
+                activeCommands--
+                val completedStartId = latestStartId
+                runMainPost(1000) {
+                    if (activeCommands == 0) stopSelfResult(completedStartId)
+                }
             }
         }
         return super.onStartCommand(intent, flags, startId)
@@ -51,7 +63,8 @@ class ExposeService : Service() {
                 syncFixState()
             }
 
-            4 -> {
+            4 -> withContext(Dispatchers.IO) {
+                probeMutex.withLock {
                 // Node-only probe: deliberately does not call screenshot/captureSnapshot.
                 val diagnostics = intent?.getBooleanExtra("diagnostics", false) == true
                 if (intent?.getBooleanExtra("beginTrace", false) == true) startTemporaryDecisionTrace()
@@ -61,7 +74,9 @@ class ExposeService : Service() {
                 if (root != null) queue.add(root)
                 var count = 0
                 var skipCandidates = 0
-                while (queue.isNotEmpty() && count < 1000) {
+                var truncated = false
+                val deadline = android.os.SystemClock.elapsedRealtime() + 2500L
+                while (queue.isNotEmpty() && count < 1000 && android.os.SystemClock.elapsedRealtime() < deadline) {
                     val node = queue.removeFirst()
                     count++
                     val bounds = android.graphics.Rect().also(node::getBoundsInScreen)
@@ -73,7 +88,13 @@ class ExposeService : Service() {
                         .put("bounds", bounds.toShortString()).put("width", bounds.width()).put("height", bounds.height())
                         .put("window", node.windowId))
                     if (node.text?.contains("跳过") == true || node.contentDescription?.contains("跳过") == true) skipCandidates++
-                    for (i in 0 until minOf(node.childCount, 200)) {
+                    val childLimit = minOf(node.childCount, 200, (1000 - count - queue.size).coerceAtLeast(0))
+                    if (childLimit < node.childCount) truncated = true
+                    for (i in 0 until childLimit) {
+                        if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                            truncated = true
+                            break
+                        }
                         node.getChild(i)?.let(queue::add)
                     }
                 }
@@ -82,6 +103,7 @@ class ExposeService : Service() {
                     .put("rootPackage", root?.packageName?.toString() ?: org.json.JSONObject.NULL)
                     .put("nodes", count).put("skipCandidates", skipCandidates)
                     .put("screenshotsUsed", false)
+                    .put("truncated", truncated || queue.isNotEmpty())
                 li.songe.gkd.util.logFolder.resolve("root-node-probe.json").writeText(report.toString())
                 LogUtils.d("Root node-only probe", report.toString())
                 if (diagnostics) {
@@ -92,6 +114,7 @@ class ExposeService : Service() {
                         .put("serviceMode", li.songe.gkd.a11y.A11yRuleEngine.service?.mode?.toString())
                     li.songe.gkd.util.logFolder.resolve("root-node-diagnostics.json").writeText(report.toString())
                     li.songe.gkd.util.logFolder.resolve("rule-decision-probe.txt").writeText(decisionTraceBuffer.exportText())
+                }
                 }
             }
 
@@ -115,6 +138,7 @@ class ExposeService : Service() {
     }
 
     companion object {
+        private val probeMutex = Mutex()
         fun initCommandFile() {
             val commandText = template
                 .replace("{service}", ExposeService::class.componentName.flattenToShortString())

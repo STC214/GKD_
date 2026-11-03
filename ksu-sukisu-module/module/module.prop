@@ -1,6 +1,6 @@
 id=gkd_ksu_sukisu
 name=GKD KernelSU/SukiSU Bundle + Keepalive
-version=202607121040
-versionCode=607121040
+version=20261103.2
+versionCode=2026110302
 author=STC214
-description=Bundles and installs GKD; removes it on module uninstall and keeps it alive with low-frequency checks.
+description=Bundles GKD with owner-only keepalive and XSpace module registration. Uninstall retains APK and app data.

@@ -25,12 +25,8 @@ load_config() {
   GKD_LOG_MAX_BYTES=262144
   [ -f "$CONFIG" ] && . "$CONFIG"
   GKD_PACKAGE=li.songe.gkd
-  case "$GKD_USER_ID" in
-    ''|*[!0-9]*)
-      log "invalid GKD_USER_ID=$GKD_USER_ID; falling back to user 0"
-      GKD_USER_ID=0
-      ;;
-  esac
+  # Never start a second matching engine from a legacy/custom profile setting.
+  GKD_USER_ID=0
 }
 
 wait_boot_completed() {

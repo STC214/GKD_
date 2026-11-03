@@ -87,26 +87,23 @@ internal fun shouldAdvanceWindowGeneration(eventType: Int): Boolean {
     return eventType == STATE_CHANGED
 }
 
-private val latestServiceMode = atomic(0)
-private val latestServiceTime = atomic(0L)
+private val activeServiceSession = ServiceSession<A11yRuleEngine>()
 
 class A11yRuleEngine(val service: A11yCommonImpl) {
     private val a11yContext = A11yContext(this)
-    private val effective get() = latestServiceMode.value == service.mode.value
+    private val effective get() = activeServiceSession.current() === this
     private val hasOthersService = when (service.mode) {
         AutomatorModeOption.A11yMode -> uiAutomationFlow.value != null
         AutomatorModeOption.AutomationMode -> A11yService.instance != null
     }
 
     fun onA11yConnected() {
-        val serviceTime = System.currentTimeMillis()
-        latestServiceMode.value = service.mode.value
-        latestServiceTime.value = serviceTime
+        val ticket = activeServiceSession.activate(this)
         // A static ad may emit its only event before this replacement service connects.
         // Bootstrap independently of the accessibility block-list feature.
         onForegroundTaskChanged()
         runMainPost(1000L) {// 共存 1000ms, 等待另一个服务稳定
-            if (latestServiceTime.value == serviceTime) {
+            if (activeServiceSession.isCurrent(this, ticket)) {
                 when (service.mode) {
                     AutomatorModeOption.A11yMode -> uiAutomationFlow.value?.shutdown(true)
                     AutomatorModeOption.AutomationMode -> A11yService.instance?.shutdown(true)
@@ -115,7 +112,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
     }
 
+    fun onDisconnected() { activeServiceSession.release(this) }
+
     fun onScreenForcedActive() {
+        if (!effective) return
         advanceWindowGeneration()
         markWindowTransition()
         // 关闭屏幕 -> Activity::onStop -> 点亮屏幕 -> Activity::onStart -> Activity::onResume
@@ -212,6 +212,8 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         // 直接丢弃自身事件，自行更新 topActivity
         if ((event.eventType == CONTENT_CHANGED || !isActivityVisible) && event.packageName == META.appId) return
 
+        if (!validEventTimestamp(event.eventTime, SystemClock.uptimeMillis())) return
+
         val a11yEvent = event.toA11yEvent() ?: return
         if (a11yEvent.type == CONTENT_CHANGED) {
             // 防止 content 类型事件过快
@@ -227,11 +229,8 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 "type:${event.eventType}, time:${event.eventTime - lastEventTime}, app:${event.packageName}, cls:${event.className}"
             )
         }
-        if (event.eventTime < lastEventTime) {
-            // 某些应用会发送负时间事件, 直接丢弃
-            // type:32, time:-104, app:com.miui.home, cls:com.miui.home.launcher.Launcher
-            return
-        }
+        // Different producers can deliver legitimate events out of order. Foreground/window
+        // confirmation below, rather than a global producer-time watermark, rejects stale input.
         lastEventTime = event.eventTime
         if (shouldAdvanceWindowGeneration(event.eventType)) {
             advanceWindowGeneration()
@@ -337,7 +336,8 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     private var foregroundWakeJob: Job? = null
 
     /** Task notifications are wake signals, not authority to click; re-confirm the window first. */
-    fun onForegroundTaskChanged() {
+    @Synchronized fun onForegroundTaskChanged() {
+        if (!effective) return
         advanceWindowGeneration()
         markWindowTransition()
         foregroundWakeJob?.cancel()
@@ -1012,12 +1012,13 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             }
             traceDecision(decisionId, DecisionStage.Action, DecisionOutcome.Submitted, DecisionReason.ActionSubmitted, rule)
             val actionContext = ActionExecutionContext.fromNode(target, windowContextToken)
+            if (!effective) return
             val submittedResult = rule.performAction(
                 node = target,
                 context = actionContext,
                 guard = ActionExecutionGuard {
-                    val latestForeground = getConfirmedForeground(decisionId)
-                    latestForeground != null &&
+                    val latestForeground = if (effective) getConfirmedForeground(decisionId) else null
+                    latestForeground != null && effective &&
                             windowGenerationState.isCurrent(windowContextToken, latestForeground) &&
                             nodeMatchesWindow(target, windowContextToken) &&
                             refreshNode(target)
@@ -1103,11 +1104,8 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     }
 
     companion object {
-        val service: A11yCommonImpl?
-            get() = uiAutomationFlow.value?.takeIf {
-                it.mode.value == latestServiceMode.value
-            } ?: A11yService.instance
-        val instance: A11yRuleEngine? get() = service?.ruleEngine
+        val service: A11yCommonImpl? get() = activeServiceSession.current()?.service
+        val instance: A11yRuleEngine? get() = activeServiceSession.current()
 
         fun compatWindows(): List<AccessibilityWindowInfo> {
             return try {

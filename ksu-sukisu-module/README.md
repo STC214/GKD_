@@ -1,6 +1,6 @@
 # GKD KernelSU / SukiSU Ultra 内置应用模块
 
-这个目录提供一个内置 GKD APK 的模块。刷入时会为配置的 Android 用户（默认 user 0）安装 `common/gkd.apk`；卸载模块时移除同一用户下的 GKD。若设备上已有 GKD，安装器通过 `pm install -r` 执行就地更新。模块不会自动授予 App 权限或开启无障碍。
+这个目录提供一个内置 GKD APK 的模块。刷入时固定为主用户 user 0 安装 `common/gkd.apk`；卸载模块保留 APK、应用数据和双开登记。若设备上已有 GKD，安装器通过 `pm install -r` 执行就地更新。模块不会自动授予 App 权限或开启无障碍。
 
 模块只做以下事情：
 
@@ -19,7 +19,7 @@
 - `module/customize.sh`：安装内置 APK、校验安装结果并设置脚本权限。
 - `module/service.sh`：开机启动、后台策略和低频保活守护。
 - `module/action.sh`：显示状态和日志，并打开已安装的 GKD。
-- `module/uninstall.sh`：移除模块时卸载 GKD，并恢复后台 AppOps、清理电池白名单。
+- `module/uninstall.sh`：移除保活策略和登记标记，保留 GKD APK、应用数据及双开登记。
 - `module/config.conf`：保活配置。
 - `module/skip_mount`：声明不 overlay 系统文件。
 - `scripts/package-ksu-module.ps1`：Windows 打包脚本，默认取用 release APK，也支持 `-ApkPath`。
@@ -66,7 +66,7 @@ GKD_POLICY_REFRESH_INTERVAL=1800
 GKD_LOG_MAX_BYTES=262144
 ```
 
-- `GKD_USER_ID=0`：指定需要保活的 Android 用户；包检测、进程 UID、服务启动、AppOps 和设置读取均使用同一用户。
+- `GKD_USER_ID=0`：固定只保活主用户；脚本忽略其他用户值，避免双开启动第二套匹配引擎。
 - 模块固定执行启动与保活，不提供关闭核心职责的配置项。开机完成后会持续等待 PackageManager 和 ActivityManager 就绪；目标用户未安装 GKD 时休眠，已安装则持续退避拉起，连续 3 秒确认进程稳定后才进入保活循环。
 - `GKD_KEEP_ALIVE_INTERVAL=300`：未安装休眠和已启动巡检的间隔秒数，限制为 60～86400。
 - `GKD_POLICY_REFRESH_INTERVAL=1800`：重新应用后台 AppOps 和电池白名单的间隔，限制为 300～604800。
@@ -87,7 +87,7 @@ GKD_LOG_MAX_BYTES=262144
 
 ## 卸载行为
 
-移除模块时把模块设置的两个后台 AppOps 恢复为系统默认、删除模块添加的电池白名单，并卸载安装时记录的 Android 用户下的 GKD。GKD 应用数据按 Android 系统卸载行为处理；其他用户下的实例不受影响。
+移除模块时把模块设置的两个后台 AppOps 恢复为系统默认、删除模块添加的电池白名单及登记标记；不卸载 GKD，不删除应用数据，不撤销双开 APK 登记。若要删除 APK，请在 Android 中另行操作。
 
 ## 日志排障
 

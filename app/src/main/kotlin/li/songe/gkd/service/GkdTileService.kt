@@ -169,6 +169,12 @@ private fun innerForcedUpdateA11yService(disabled: Boolean) {
         return
     }
     if (currentAppUseA11y) {
+        A11yService.instance?.let { current ->
+            if (li.songe.gkd.a11y.A11yRuleEngine.instance !== current.ruleEngine) {
+                current.ruleEngine.onA11yConnected()
+            }
+            return
+        }
         if (A11yService.isRunning.value) {
             return
         }

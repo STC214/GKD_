@@ -7,9 +7,7 @@ GKD_PACKAGE=li.songe.gkd
 GKD_USER_ID=0
 [ -f "$CONFIG" ] && . "$CONFIG"
 GKD_PACKAGE=li.songe.gkd
-case "$GKD_USER_ID" in
-  ''|*[!0-9]*) GKD_USER_ID=0 ;;
-esac
+GKD_USER_ID=0
 
 echo "GKD KernelSU/SukiSU Bundle + Keepalive Module"
 echo "Module path: $MODDIR"

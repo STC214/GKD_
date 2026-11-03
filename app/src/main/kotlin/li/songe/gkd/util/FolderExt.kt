@@ -62,9 +62,7 @@ private val tempDir: File
     get() = cacheDir.resolve("temp").autoMk()
 
 fun createGkdTempDir(): File {
-    return tempDir
-        .resolve(System.currentTimeMillis().toString())
-        .apply { mkdirs() }
+    return createUniqueTempDir(tempDir)
 }
 
 private fun removeExpired(dir: File) {

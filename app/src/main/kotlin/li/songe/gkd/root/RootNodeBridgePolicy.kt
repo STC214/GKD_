@@ -9,22 +9,41 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import li.songe.gkd.appScope
 import li.songe.gkd.store.*
 import li.songe.gkd.util.LogUtils
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private val nodeInventory = MutableStateFlow(emptySet<String>())
 
 /** The app owns the policy. Hook processes only receive a short-lived, deny-first lease. */
 fun initRootNodeBridgePolicy() {
-    var service: XposedService? = null
+    val service = AtomicReference<XposedService?>(null)
+    val publishMutex = Mutex()
+    suspend fun publish() = publishMutex.withLock {
+        runCatching { publishRootNodePolicy(service.get()) }.onFailure { LogUtils.d("Node bridge policy sync failed", it) }
+    }
     XposedServiceHelper.registerListener(object : XposedServiceHelper.OnServiceListener {
-        override fun onServiceBind(value: XposedService) { service = value; NodeScopeSetup.service.value = value; publish() }
-        override fun onServiceDied(value: XposedService) { service = null; NodeScopeSetup.service.value = null }
-        private fun publish() {
-            runCatching { publishRootNodePolicy(service) }.onFailure { LogUtils.d("Node bridge policy sync failed", it) }
+        override fun onServiceBind(value: XposedService) {
+            synchronized(service) {
+                service.set(value); NodeScopeSetup.service.value = value
+            }
+            appScope.launch(Dispatchers.IO) { publish() }
+        }
+        override fun onServiceDied(value: XposedService) {
+            val removed = synchronized(service) {
+                if (service.compareAndSet(value, null)) {
+                    NodeScopeSetup.service.value = null
+                    true
+                } else false
+            }
+            if (removed) {
+                appScope.launch(Dispatchers.IO) { publish() }
+            }
         }
     })
-    appScope.launch {
+    appScope.launch(Dispatchers.IO) {
         while (true) {
-            runCatching { publishRootNodePolicy(service) }.onFailure { LogUtils.d("Node bridge policy sync failed", it) }
+            publish()
             delay(2000L)
         }
     }
@@ -53,6 +72,7 @@ private fun publishRootNodePolicy(service: XposedService?) {
     val prefs = service?.getRemotePreferences("root_node_bridge") ?: return
     prefs.edit().putBoolean("enabled", enabled)
         .putLong("leaseUntil", if (enabled) System.currentTimeMillis() + 15_000L else 0L)
+        .putLong("leaseUntilElapsed", if (enabled) android.os.SystemClock.elapsedRealtime() + 15_000L else 0L)
         .putStringSet("excluded", excluded)
         .putStringSet("allowed", allowed)
         .apply()

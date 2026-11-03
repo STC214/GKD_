@@ -34,6 +34,7 @@ public final class RootNodeBridgeModule extends XposedModule {
     private String lastBrokerFailure;
     private boolean watchStarted;
     private volatile boolean hasRoots;
+    private final Object rootsLock = new Object();
 
     @Override public void onPackageReady(PackageReadyParam param) {
         if (installed || !param.isFirstPackage()) return;
@@ -54,11 +55,13 @@ public final class RootNodeBridgeModule extends XposedModule {
                 if (!method.getName().equals("setView")) continue;
                 hook(method).intercept(chain -> {
                     Object result = chain.proceed();
+                    try {
                     Object root = chain.getThisObject();
-                    observed.put(root, true);
+                    synchronized (rootsLock) { observed.put(root, true); }
                     hasRoots = true;
                     startWatching();
                     if (eligible()) register(root);
+                    } catch (Throwable error) { log(Log.WARN, TAG, "observe root failed", error); }
                     return result;
                 });
             }
@@ -67,7 +70,7 @@ public final class RootNodeBridgeModule extends XposedModule {
     }
 
     /** Push/background-only processes never start a policy polling worker. */
-    private void startWatching() {
+    private synchronized void startWatching() {
         if (watchStarted) return;
         watchStarted = true;
         if (targetUserId == 999) {
@@ -92,8 +95,9 @@ public final class RootNodeBridgeModule extends XposedModule {
         try {
             Set<String> excluded = policy.getStringSet("excluded", Collections.emptySet());
             Set<String> allowed = policy.getStringSet("allowed", Collections.emptySet());
-            return policy.getBoolean("enabled", false) &&
-                policy.getLong("leaseUntil", 0) > System.currentTimeMillis() &&
+            return NodeBridgeLease.isValid(policy.getBoolean("enabled", false),
+                policy.getLong("leaseUntilElapsed", 0), SystemClock.elapsedRealtime(),
+                policy.getLong("leaseUntil", 0), System.currentTimeMillis()) &&
                 allowed.contains(appId) && !excluded.contains(appId);
         } catch (Throwable ignored) { return false; }
     }
@@ -139,6 +143,7 @@ public final class RootNodeBridgeModule extends XposedModule {
 
     private void register(Object root) {
         try {
+            if (field(root, "mView") == null) return;
             Object attach = field(root, "mAttachInfo");
             int before = (Integer) field(attach, "mAccessibilityWindowId");
             if (before != -1 || !eligible()) return;
@@ -146,7 +151,7 @@ public final class RootNodeBridgeModule extends XposedModule {
             call(manager, "ensureConnection");
             int after = (Integer) field(attach, "mAccessibilityWindowId");
             if (after == -1) { log(Log.WARN, TAG, "registration returned no window"); return; }
-            owned.put(root, after);
+            synchronized (rootsLock) { owned.put(root, after); }
             try { call(root, "setAccessibilityWindowAttributesIfNeeded"); } catch (Exception ignored) { }
             Context context = (Context) field(root, "mContext");
             AccessibilityManager am = context.getSystemService(AccessibilityManager.class);
@@ -158,18 +163,34 @@ public final class RootNodeBridgeModule extends XposedModule {
     }
 
     private void refreshConnections() {
-        hasRoots = !observed.isEmpty();
+        Object[] roots;
+        Map<Object, Integer> connections;
+        synchronized (rootsLock) {
+            roots = observed.keySet().toArray();
+            hasRoots = roots.length != 0;
+            connections = new java.util.HashMap<>(owned);
+        }
         if (eligible()) {
-            for (Object root : observed.keySet()) register(root);
+            for (Object root : roots) onRootThread(root, () -> register(root));
             return;
         }
-        for (Map.Entry<Object, Integer> entry : owned.entrySet()) {
+        for (Map.Entry<Object, Integer> entry : connections.entrySet()) {
+            onRootThread(entry.getKey(), () -> {
             try {
+                if (eligible()) return;
                 Object root = entry.getKey();
                 int current = (Integer) field(field(root, "mAttachInfo"), "mAccessibilityWindowId");
                 if (current == entry.getValue()) call(field(root, "mAccessibilityInteractionConnectionManager"), "ensureNoConnection");
+                synchronized (rootsLock) { owned.remove(root); }
             } catch (Throwable error) { log(Log.WARN, TAG, "cleanup failed", error); }
+            });
         }
-        owned.clear();
+    }
+
+    private void onRootThread(Object root, Runnable task) {
+        try {
+            Handler handler = (Handler) field(root, "mHandler");
+            if (handler.getLooper() == Looper.myLooper()) task.run(); else handler.post(task);
+        } catch (Throwable error) { log(Log.WARN, TAG, "root dispatch failed", error); }
     }
 }

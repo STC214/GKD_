@@ -122,6 +122,7 @@ abstract class A11yService : AccessibilityService(), OnA11yLife by DefaultA11yLi
     private var tempShutdownFlag = false
 
     override fun shutdown(temp: Boolean) {
+        ruleEngine.onDisconnected()
         if (temp) {
             tempShutdownFlag = true
         }
@@ -137,7 +138,10 @@ abstract class A11yService : AccessibilityService(), OnA11yLife by DefaultA11yLi
         useLogLifecycle()
         useAliveFlow(isRunning)
         onA11yConnected { instance = this }
-        onDestroyed { instance = null }
+        onDestroyed {
+            ruleEngine.onDisconnected()
+            if (instance === this) instance = null
+        }
         onCreated {
             if (currentAppUseA11y) {
                 updateEnableAutomator(true)
@@ -151,7 +155,7 @@ abstract class A11yService : AccessibilityService(), OnA11yLife by DefaultA11yLi
                 toast("无障碍局部关闭")
             } else {
                 toast("无障碍已关闭")
-                updateEnableAutomator(false)
+                if (A11yRuleEngine.instance == null) updateEnableAutomator(false)
             }
         }
         useAliveOverlayView()

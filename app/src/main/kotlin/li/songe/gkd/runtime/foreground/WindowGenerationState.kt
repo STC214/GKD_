@@ -7,6 +7,7 @@ data class WindowContextToken(
     val appId: String?,
     val displayId: Int,
     val rotation: Int,
+    val userId: Int?,
 )
 
 /** Invalidates selector results whenever the observed window tree changes. */
@@ -34,6 +35,7 @@ class WindowGenerationState {
             appId = snapshot.appId,
             displayId = snapshot.displayId,
             rotation = snapshot.rotation,
+            userId = snapshot.userId,
         )
     }
 
@@ -47,7 +49,8 @@ class WindowGenerationState {
                 token.windowId == snapshot.window?.windowId &&
                 token.appId == snapshot.appId &&
                 token.displayId == snapshot.displayId &&
-                token.rotation == snapshot.rotation
+                token.rotation == snapshot.rotation &&
+                token.userId == snapshot.userId
     }
 
     @Synchronized

@@ -35,8 +35,8 @@ object RootServiceClient {
     private var activeConnection: ServiceConnection? = null
     private var activeConnectTimeout: Runnable? = null
     private var activeDeathRecipient: IBinder.DeathRecipient? = null
-    private var remoteBinder: IBinder? = null
-    private var remoteService: IRootService? = null
+    @Volatile private var remoteBinder: IBinder? = null
+    @Volatile private var remoteService: IRootService? = null
 
     private fun newConnection(generation: Long) = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -57,13 +57,13 @@ object RootServiceClient {
                     return
                 }
                 val deathRecipient = IBinder.DeathRecipient {
-                    if (connectionGeneration != generation || remoteBinder !== binder) return@DeathRecipient
-                    activeDeathRecipient = null
-                    remoteBinder = null
-                    remoteService = null
-                    bound = false
-                    activeConnection = null
-                    mutableState.value = RootServiceState.Failed("binder died", retryable = true)
+                    mainHandler.post {
+                        if (connectionGeneration != generation || remoteBinder !== binder) return@post
+                        clearConnectTimeout()
+                        releaseBinding()
+                        clearBinder()
+                        mutableState.value = RootServiceState.Failed("binder died", retryable = true)
+                    }
                 }
                 binder.linkToDeath(deathRecipient, 0)
                 activeDeathRecipient = deathRecipient
@@ -114,6 +114,10 @@ object RootServiceClient {
     }
 
     fun connect(context: Context) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { connect(context) }
+            return
+        }
         if (bound || mutableState.value == RootServiceState.Connecting) return
         mutableState.value = RootServiceState.Connecting
         val generation = ++connectionGeneration
@@ -148,6 +152,10 @@ object RootServiceClient {
     }
 
     fun disconnect() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { disconnect() }
+            return
+        }
         connectionGeneration += 1
         clearConnectTimeout()
         releaseBinding()
@@ -160,12 +168,7 @@ object RootServiceClient {
         return try {
             service.performInput(request)
         } catch (e: Throwable) {
-            releaseBinding()
-            clearBinder()
-            mutableState.value = RootServiceState.Failed(
-                e.message ?: e::class.java.simpleName,
-                retryable = true,
-            )
+            failRemote(service, e)
             // The remote process may have accepted the transaction before the Binder failed.
             // Treat this as ambiguous/failed so callers never repeat a possible side effect.
             ROOT_INPUT_RESULT_FAILED
@@ -178,12 +181,7 @@ object RootServiceClient {
         return try {
             service.getForegroundTask(displayId)?.toForegroundTask()
         } catch (e: Throwable) {
-            releaseBinding()
-            clearBinder()
-            mutableState.value = RootServiceState.Failed(
-                e.message ?: e::class.java.simpleName,
-                retryable = true,
-            )
+            failRemote(service, e)
             LogUtils.d("RootService foreground task failed", e)
             null
         }
@@ -193,6 +191,18 @@ object RootServiceClient {
         val service = remoteService ?: return null
         return runCatching { service.detectorFolderPackages?.toSet() }
             .onFailure { LogUtils.d("RootService detector folder read failed", it) }.getOrNull()
+    }
+
+    private fun failRemote(failedService: IRootService, error: Throwable) {
+        mainHandler.post {
+            // An old transaction failure must not tear down a newly connected service.
+            if (remoteService !== failedService) return@post
+            releaseBinding()
+            clearBinder()
+            mutableState.value = RootServiceState.Failed(
+                error.message ?: error::class.java.simpleName, retryable = true,
+            )
+        }
     }
 
     fun publishNodePolicy(enabled: Boolean, excluded: Set<String>, allowed: Set<String>) {

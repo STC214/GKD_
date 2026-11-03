@@ -26,8 +26,23 @@ internal object BundledLocalRules {
         }
         val next = current.toMutableMap().apply {
             put("globalGroups", JsonArray(groups + missing))
-            put("version", JsonPrimitive((current["version"]?.jsonPrimitive?.intOrNull ?: 0) + 1))
+            val version = current["version"]?.jsonPrimitive?.intOrNull ?: 0
+            put("version", JsonPrimitive((version.toLong() + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()))
         }
         return Plan(JsonObject(next), changed = true, enableEmptyLocal = emptyLocal)
     }
 }
+
+/** Metadata is durable before publishing a new file. Retrying after any interruption is idempotent. */
+internal suspend fun applyBundledRulePlan(
+    plan: BundledLocalRules.Plan,
+    ensureMetadata: suspend () -> Unit,
+    writeSubscription: () -> Unit,
+    writeMarker: () -> Unit,
+) {
+    ensureMetadata()
+    if (plan.changed) writeSubscription()
+    writeMarker()
+}
+
+internal fun bundledMigrationComplete(marker: String?): Boolean = marker == "1"

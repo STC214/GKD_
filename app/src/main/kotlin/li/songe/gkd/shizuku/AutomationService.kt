@@ -74,17 +74,19 @@ class AutomationService private constructor() : A11yCommonImpl {
     private fun connect() {
         handlerThread.start()
         uiAutomation.casted.connect(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
-        uiAutomation.setOnAccessibilityEventListener(listener)
         connected = true
+        uiAutomation.setOnAccessibilityEventListener(listener)
         toast("自动化已启动")
         updateEnableAutomator(true)
         ruleEngine.onA11yConnected()
     }
 
     private fun disconnect() {
+        ruleEngine.onDisconnected()
         scope.cancel()
         handlerThread.quit()
         if (!connected) return
+        connected = false
         uiAutomation.setOnAccessibilityEventListener(null)
         safeInvokeShizuku {
             uiAutomation.casted.disconnect()
@@ -93,7 +95,7 @@ class AutomationService private constructor() : A11yCommonImpl {
             toast("自动化局部关闭")
         } else {
             toast("自动化已关闭")
-            updateEnableAutomator(false)
+            if (A11yRuleEngine.instance == null) updateEnableAutomator(false)
         }
     }
 
@@ -103,7 +105,7 @@ class AutomationService private constructor() : A11yCommonImpl {
             tempShutdownFlag = true
         }
         disconnect()
-        uiAutomationFlow.value = null
+        if (uiAutomationFlow.value === this) uiAutomationFlow.value = null
     }
 
     companion object {
@@ -113,7 +115,11 @@ class AutomationService private constructor() : A11yCommonImpl {
             loading.value = true
             try {
                 automationRegisteredExceptionFlow.value = null
-                if (uiAutomationFlow.value?.connected == true) {
+                val current = uiAutomationFlow.value
+                if (current?.connected == true) {
+                    // Reclaim an existing connection when the user switches modes during
+                    // the coexistence grace period; cancel the old engine's delayed cleanup.
+                    if (A11yRuleEngine.instance !== current.ruleEngine) current.ruleEngine.onA11yConnected()
                     return
                 }
                 uiAutomationFlow.value?.shutdown()

@@ -16,7 +16,8 @@ GKD_PACKAGE=li.songe.gkd
 GKD_USER_ID=0
 GKD_REGISTER_XSPACE_MODULE=1
 [ -f "$CONFIG" ] && . "$CONFIG"
-case "$GKD_USER_ID" in ''|*[!0-9]*) GKD_USER_ID=0 ;; esac
+# Owner 0 is the only matching engine. XSpace is a module-host registration only.
+GKD_USER_ID=0
 GKD_PACKAGE=li.songe.gkd
 APK="$MODPATH/common/gkd.apk"
 MARKER=${GKD_MARKER_PATH:-/data/adb/gkd_ksu_sukisu_app_installed}

@@ -17,6 +17,9 @@ import li.songe.gkd.appScope
 import li.songe.gkd.app
 import li.songe.gkd.R
 import li.songe.gkd.data.BundledLocalRules
+import li.songe.gkd.data.applyBundledRulePlan
+import li.songe.gkd.data.bundledMigrationComplete
+import android.util.AtomicFile
 import kotlinx.serialization.json.jsonObject
 import li.songe.gkd.data.AppRule
 import li.songe.gkd.data.CategoryConfig
@@ -445,20 +448,17 @@ fun initSubsState() {
 private suspend fun installBundledNoticeRules() {
     if (android.os.Process.myUid() / 100000 != 0) return
     val marker = storeFolder.resolve("bundled_keke_notice_v1.txt")
-    if (marker.exists()) return
+    if (bundledMigrationComplete(runCatching { AtomicFile(marker).openRead().bufferedReader().use { it.readText() } }.getOrNull())) return
     val file = subsFolder.resolve("$LOCAL_SUBS_ID.json")
-    val current = json.parseToJsonElement(if (file.exists()) file.readText() else
+    val current = json.parseToJsonElement(if (file.exists() || file.resolveSibling(file.name + ".bak").exists()) AtomicFile(file).openRead().bufferedReader().use { it.readText() } else
         """{"id":-2,"name":"本地订阅","version":0}""").jsonObject
     val bundle = app.resources.openRawResource(R.raw.keke_notice_rules).bufferedReader().use {
         json.parseToJsonElement(it.readText()).jsonObject
     }
     val plan = BundledLocalRules.merge(current, bundle)
-    if (plan.changed) {
-        // Validate using the same parser before replacing the user's file.
-        RawSubscription.parse(plan.subscription.toString(), json5 = false)
-        val temp = file.resolveSibling(file.name + ".bundled.tmp")
-        temp.writeText(plan.subscription.toString())
-        check(temp.renameTo(file)) { "Could not replace local subscription" }
+    // Validate using the same parser before modifying either durable component.
+    RawSubscription.parse(plan.subscription.toString(), json5 = false)
+    applyBundledRulePlan(plan, ensureMetadata = {
         val existing = DbSet.subsItemDao.queryAll().find { it.id == LOCAL_SUBS_ID }
         if (existing == null) {
             DbSet.subsItemDao.insertOrIgnore(SubsItem(
@@ -468,8 +468,26 @@ private suspend fun installBundledNoticeRules() {
         } else if (plan.enableEmptyLocal && !existing.enable) {
             DbSet.subsItemDao.updateEnable(LOCAL_SUBS_ID, true)
         }
+    }, writeSubscription = {
+        writeAtomicText(file, plan.subscription.toString())
+    }, writeMarker = {
+        writeAtomicText(marker, "1")
+    })
+}
+
+private fun writeAtomicText(file: java.io.File, text: String) {
+    val atomicFile = AtomicFile(file)
+    val output = atomicFile.startWrite()
+    try {
+        output.write(text.toByteArray(Charsets.UTF_8))
+        atomicFile.finishWrite(output)
+        check(atomicFile.openRead().use { it.readBytes() }.contentEquals(text.toByteArray(Charsets.UTF_8))) {
+            "Atomic local subscription write did not persist"
+        }
+    } catch (error: Throwable) {
+        atomicFile.failWrite(output)
+        throw error
     }
-    marker.writeText("1")
 }
 
 private suspend fun cleanupSubsConfig(subsId: Long, subsRaw: RawSubscription): Int {
