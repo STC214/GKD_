@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simplified portrait from gkd_icon_art for alpha-only system icon surfaces. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M10,3L8,2L8.2,4L5,3.5L6.5,5L3.8,6L5,7L3.5,9L5,9L4.8,12L6,11L6.5,14L7.5,13L8,14.5L7,17L4.5,18L3,21L21,21L19.5,18L17,17L16,14.5L17,13L18,12L18.2,10L20,10L18.5,8L20,7L17,6L18,4L15,4.5L14,2L12,4Z M8,7L8,10L7,9.5L7.5,12L9,14L12,15L15,13.5L16,11L16,8L13,7L12,9L10,7L9,10Z M9,17L12,19L15,17L14,20L10,20Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M9,10L10.5,10L10.5,11.5L9,11.5Z M13,10L14.5,10L14.5,11.5L13,11.5Z M10.5,12.5L13.5,12.5L12,14Z" />
+</vector>

@@ -1,9 +1,7 @@
 package li.songe.gkd.ui
 
 import androidx.activity.compose.LocalActivity
-import androidx.compose.animation.graphics.res.animatedVectorResource
-import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
-import androidx.compose.animation.graphics.vector.AnimatedImageVector
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -25,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -50,9 +46,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.serialization.Serializable
 import li.songe.gkd.META
 import li.songe.gkd.MainActivity
@@ -66,7 +60,6 @@ import li.songe.gkd.ui.component.SettingItem
 import li.songe.gkd.ui.component.TextListDialog
 import li.songe.gkd.ui.component.TextMenu
 import li.songe.gkd.ui.component.waitResult
-import li.songe.gkd.ui.share.LocalDarkTheme
 import li.songe.gkd.ui.share.LocalMainViewModel
 import li.songe.gkd.ui.share.asMutableState
 import li.songe.gkd.ui.style.EmptyHeight
@@ -180,7 +173,7 @@ fun AboutPage() {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                AnimatedLogoIcon(
+                BrandLogoIcon(
                     modifier = Modifier
                         .clickable(
                             indication = null,
@@ -387,27 +380,12 @@ private fun exportPlayTipTemplate(): AnnotatedString {
 }
 
 @Composable
-private fun AnimatedLogoIcon(
+private fun BrandLogoIcon(
     modifier: Modifier = Modifier
 ) {
-    val darkTheme = LocalDarkTheme.current
-    val colorRid = if (darkTheme) R.color.better_white else R.color.better_black
-    var atEnd by remember { mutableStateOf(false) }
-    val animation = AnimatedImageVector.animatedVectorResource(id = R.drawable.ic_anim_logo)
-    val painter = rememberAnimatedVectorPainter(
-        animation,
-        atEnd
-    )
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            atEnd = !atEnd
-            delay(animation.totalDuration.toLong())
-        }
-    }
-    Icon(
+    Image(
         modifier = modifier,
-        painter = painter,
+        painter = painterResource(R.drawable.gkd_icon_art),
         contentDescription = null,
-        tint = colorResource(colorRid),
     )
 }

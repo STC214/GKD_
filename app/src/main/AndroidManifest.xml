@@ -198,7 +198,7 @@
         <service
             android:name=".service.GkdTileService"
             android:exported="true"
-            android:icon="@drawable/ic_status"
+            android:icon="@drawable/ic_brand_monochrome"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <meta-data
