@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="brand_icon_background">#218FF0</color>
     <color name="better_white">#FCFCFC</color>
     <color name="better_black">#111111</color>
 </resources>

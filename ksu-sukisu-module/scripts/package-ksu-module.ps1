@@ -18,7 +18,12 @@ if (-not $OutputPath) {
     $OutputPath = Join-Path $distDir "gkd-ksu-sukisu-module.zip"
 }
 if (-not $ApkPath) {
-    $ApkPath = Join-Path $repoRoot "app\build\outputs\apk\gkd\release\app-gkd-release.apk"
+    $apkDir = Join-Path $repoRoot "app\build\outputs\apk\gkd\release"
+    $metadata = Get-Content -LiteralPath (Join-Path $apkDir "output-metadata.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (@($metadata.elements).Count -ne 1) { throw "Expected one release APK in output metadata" }
+    $ApkPath = [System.IO.Path]::GetFullPath((Join-Path $apkDir $metadata.elements[0].outputFile))
+    $apkDirPrefix = [System.IO.Path]::GetFullPath($apkDir).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $ApkPath.StartsWith($apkDirPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "APK metadata path escapes release directory" }
 }
 $ApkPath = [System.IO.Path]::GetFullPath($ApkPath)
 if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf)) {
@@ -33,6 +38,14 @@ if ($ExpectedApkSha256 -and $apkSha256 -ne $ExpectedApkSha256.ToLowerInvariant()
 }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputParent = Split-Path -Parent $OutputPath
+if ([System.IO.Path]::GetExtension($OutputPath) -ne ".zip") { throw "Module output must use .zip" }
+if ($OutputPath -eq $ApkPath) { throw "Module output must not overwrite APK" }
+foreach ($protectedDir in @($workDir, $templateDir)) {
+    $prefix = [System.IO.Path]::GetFullPath($protectedDir).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if ($ApkPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or $OutputPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "APK and output must stay outside module staging/template directories"
+    }
+}
 
 $expectedWorkDir = [System.IO.Path]::GetFullPath((Join-Path $moduleRoot "work"))
 if ([System.IO.Path]::GetFullPath($workDir) -ne $expectedWorkDir) {
@@ -55,15 +68,16 @@ Get-ChildItem -LiteralPath $stagingDir -Recurse -File |
         [System.IO.File]::WriteAllText($_.FullName, $content, [System.Text.UTF8Encoding]::new($false))
     }
 
-$timestamp = Get-Date -Format "yyyyMMddHHmm"
-$versionCode = $timestamp.Substring($timestamp.Length - 9)
 $stagedModuleProp = Join-Path $stagingDir "module.prop"
 $moduleProp = Get-Content -LiteralPath $stagedModuleProp -Raw -Encoding UTF8
-$moduleProp = $moduleProp -replace '(?m)^version=.*$', "version=$timestamp"
-$moduleProp = $moduleProp -replace '(?m)^versionCode=.*$', "versionCode=$versionCode"
-[System.IO.File]::WriteAllText($stagedModuleProp, $moduleProp, [System.Text.UTF8Encoding]::new($false))
+if ($moduleProp -notmatch '(?m)^version=\S+$') { throw "Missing module version" }
+if ($moduleProp -notmatch '(?m)^versionCode=([0-9]+)$') { throw "Missing numeric module versionCode" }
+$moduleVersionCode = 0
+if (-not [int]::TryParse($Matches[1], [ref]$moduleVersionCode) -or $moduleVersionCode -le 0) { throw "Invalid module versionCode" }
 
-Remove-Item -LiteralPath $OutputPath -Force -ErrorAction SilentlyContinue
+# Do not destroy the last good bundle if archive creation or verification fails.
+$finalOutputPath = $OutputPath
+$OutputPath = Join-Path $outputParent (([System.IO.Path]::GetFileName($finalOutputPath)) + "." + [guid]::NewGuid().ToString("N") + ".tmp")
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -123,6 +137,7 @@ finally {
     $zipCheck.Dispose()
 }
 
-Write-Host "Packaged GKD bundle module: $OutputPath"
+Move-Item -LiteralPath $OutputPath -Destination $finalOutputPath -Force
+Write-Host "Packaged GKD bundle module: $finalOutputPath"
 Write-Host "Bundled APK: common/gkd.apk ($((Get-Item -LiteralPath $ApkPath).Length) bytes)"
 Write-Host "Bundled APK SHA256: $apkSha256"
