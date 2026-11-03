@@ -9,14 +9,16 @@ GKD_USER_ID=0
 GKD_PACKAGE=li.songe.gkd
 GKD_USER_ID=0
 
-echo "GKD KernelSU/SukiSU Bundle + Keepalive Module"
+echo "GKD Root/Zygisk Global Node Bridge + Keepalive"
 echo "Module path: $MODDIR"
 echo "Package: $GKD_PACKAGE"
 echo "Android user: $GKD_USER_ID"
+echo "Global targets: regular apps in users 0/999; GKD whitelist controls eligibility"
+echo "LSPosed target scopes and a cloned matching engine are not required"
 if pm list packages --user 999 "$GKD_PACKAGE" 2>/dev/null | grep -Fxq "package:$GKD_PACKAGE"; then
-  echo "XSpace 999: APK registered for LSPosed; engine keepalive remains user $GKD_USER_ID"
+  echo "XSpace 999: optional legacy APK host present; engine keepalive remains user $GKD_USER_ID"
 else
-  echo "XSpace 999: no module registration"
+  echo "XSpace 999: no GKD host; global bridge does not require one"
 fi
 echo
 

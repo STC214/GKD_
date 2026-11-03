@@ -1,6 +1,6 @@
 id=gkd_ksu_sukisu
 name=GKD KernelSU/SukiSU Bundle + Keepalive
-version=20261103.5
-versionCode=2026110305
+version=20261103.6-global-trial
+versionCode=2026110306
 author=STC214
-description=Bundles GKD with owner-only keepalive and XSpace module registration. Uninstall retains APK and app data.
+description=GKD global Zygisk node bridge with internal whitelist and owner-only matching. No per-app LSPosed scopes. Uninstall retains APK and app data.

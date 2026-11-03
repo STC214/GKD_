@@ -63,12 +63,13 @@ fun initRootNodeBridgePolicy() {
 
 private fun publishRootNodePolicy(service: XposedService?) {
     val store = storeFlow.value
-    val enabled = service != null && android.os.Process.myUid() / 100000 == 0 &&
+    val enabled = android.os.Process.myUid() / 100000 == 0 &&
         store.enableApkRoot && store.enableAutomator && store.enableMatch &&
         detectorFolderScopeReadyFlow.value && RootServiceClient.state.value is RootServiceState.Connected
     val excluded = blockMatchAppListFlow.value + actualBlockA11yAppList + detectorFolderPackagesFlow.value + nodeBridgeProtectedPackages
     val allowed = nodeInventory.value - nodeBridgeProtectedPackages
-    RootServiceClient.publishNodePolicy(enabled, excluded, allowed)
+    RootServiceClient.publishNodePolicy(enabled, detectorFolderScopeReadyFlow.value, excluded, allowed,
+        detectorFolderPackagesFlow.value + nodeBridgeProtectedPackages)
     val prefs = service?.getRemotePreferences("root_node_bridge") ?: return
     prefs.edit().putBoolean("enabled", enabled)
         .putLong("leaseUntil", if (enabled) System.currentTimeMillis() + 15_000L else 0L)

@@ -18,4 +18,6 @@ dumpsys deviceidle whitelist -"$GKD_PACKAGE" >/dev/null 2>&1
 
 MARKER=${GKD_MARKER_PATH:-/data/adb/gkd_ksu_sukisu_app_installed}
 rm -f "$MARKER" "$MARKER.xspace"
+# Only this bridge's generated readiness cache is removed; preserve app/user data.
+rm -f /data/adb/gkd_node_bridge/protected.v1 /data/adb/gkd_node_bridge/protected.v1.bak /data/adb/gkd_node_bridge/protected.v1.new
 echo "Keepalive removed; GKD APK, data and XSpace registration retained"

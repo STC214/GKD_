@@ -25,6 +25,7 @@ local.properties
 # Local module package outputs
 /ksu-sukisu-module/dist/
 /ksu-sukisu-module/work/
+/ksu-sukisu-module/global/build/
 
 # Local third-party packages, diagnostics, and device-specific files
 /local-assets/

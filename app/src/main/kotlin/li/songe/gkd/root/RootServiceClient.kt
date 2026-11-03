@@ -205,8 +205,8 @@ object RootServiceClient {
         }
     }
 
-    fun publishNodePolicy(enabled: Boolean, excluded: Set<String>, allowed: Set<String>) {
-        remoteService?.publishNodePolicy(enabled, excluded.toTypedArray(), allowed.toTypedArray())
+    fun publishNodePolicy(enabled: Boolean, scopeReady: Boolean, excluded: Set<String>, allowed: Set<String>, protectedPackages: Set<String>) {
+        remoteService?.publishNodePolicy(enabled, scopeReady, excluded.toTypedArray(), allowed.toTypedArray(), protectedPackages.toTypedArray())
     }
 
     fun requestXSpaceScopeSetup(): Boolean = remoteService?.requestXSpaceScopeSetup() == true

@@ -10,11 +10,15 @@ set_perm "$MODPATH/common/gkd.apk" 0 0 0644
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
+set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
+set_perm "$MODPATH/common/global_bridge.dex" 0 0 0644
+set_perm "$MODPATH/zygisk/arm64-v8a.so" 0 0 0644
+set_perm "$MODPATH/zygisk/x86_64.so" 0 0 0644
 
 CONFIG="$MODPATH/config.conf"
 GKD_PACKAGE=li.songe.gkd
 GKD_USER_ID=0
-GKD_REGISTER_XSPACE_MODULE=1
+GKD_REGISTER_XSPACE_MODULE=0
 [ -f "$CONFIG" ] && . "$CONFIG"
 # Owner 0 is the only matching engine. XSpace is a module-host registration only.
 GKD_USER_ID=0
@@ -26,6 +30,11 @@ ui_print "- Installing bundled GKD APK for Android user $GKD_USER_ID"
 if [ ! -s "$APK" ]; then
     ui_print "! Bundled APK missing or empty: $APK"
     abort "GKD module installation failed"
+fi
+if [ ! -s "$MODPATH/common/global_bridge.dex" ] ||
+   [ ! -s "$MODPATH/zygisk/arm64-v8a.so" ] || [ ! -s "$MODPATH/zygisk/x86_64.so" ] ||
+   [ ! -s "$MODPATH/post-fs-data.sh" ]; then
+    abort "Global bridge payload missing; install the complete module bundle"
 fi
 if ! pm install --user "$GKD_USER_ID" -r "$APK"; then
     ui_print "! APK installation failed for user $GKD_USER_ID"
@@ -61,7 +70,7 @@ if [ ! -f "$APP_FILES/store/store.json" ] && [ ! -f "$EXTERNAL_STORE" ]; then
         *) settings --user 0 put secure enabled_accessibility_services "${CURRENT_SERVICES:+$CURRENT_SERVICES:}$A11Y_SERVICE" || abort "Fresh bootstrap accessibility setup failed" ;;
     esac
     settings --user 0 put secure accessibility_enabled 1 || abort "Fresh bootstrap accessibility enable failed"
-    ui_print "- Fresh owner setup enabled; confirm initial Root/LSPosed approval once"
+    ui_print "- Fresh owner setup enabled; confirm GKD's initial Root approval once"
 else
     ui_print "- Existing configuration retained; no automatic re-enable or permission rewrite"
 fi
@@ -82,6 +91,8 @@ if [ "$GKD_USER_ID" = 0 ] && [ "$GKD_REGISTER_XSPACE_MODULE" = 1 ] &&
         printf '999\n' > "$MARKER.xspace"
         ui_print "- Same APK registered for XSpace 999; no second engine started"
     fi
-    ui_print "- Enable GKD and its target scope separately in LSPosed user 999"
+    ui_print "- Optional legacy module-host registration retained; global bridge needs no LSPosed target scope"
 fi
 ui_print "- GKD installed and verified for user $GKD_USER_ID"
+ui_print "- Global bridge requires a working Zygisk host and one reboot after install/update"
+ui_print "- One owner matching engine covers regular apps in users 0/999; GKD whitelist controls runtime eligibility"

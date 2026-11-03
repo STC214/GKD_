@@ -246,7 +246,7 @@ class App : Application() {
         initShizuku()
         initSubsState()
         initA11yWhiteAppList()
-        li.songe.gkd.store.initModuleBootstrap()
+        // Global Zygisk bridging never requests LSPosed target scopes at startup.
         clearHttpSubs()
         syncFixState()
     }

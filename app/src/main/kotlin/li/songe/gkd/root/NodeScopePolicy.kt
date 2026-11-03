@@ -3,6 +3,7 @@ package li.songe.gkd.root
 internal val nodeBridgeProtectedPackages = detectorFolderSeedPackages + setOf(
     "android", "li.songe.gkd", "li.songe.gkd.debug", "com.android.systemui",
     "com.android.settings", "com.android.shell", "org.lsposed.manager", "org.frknkrc44.hma_oss",
+    "com.sukisu.ultra", "me.weishu.kernelsu", "com.topjohnwu.magisk",
 )
 
 /** Scope is a stable ceiling; normal whitelist changes only alter runtime eligibility. */

@@ -47,10 +47,11 @@ class GkdRootService : RootService() {
     }
 
     private val binder = object : IRootService.Stub() {
-        override fun publishNodePolicy(enabled: Boolean, excluded: Array<String>, allowed: Array<String>) {
+        override fun publishNodePolicy(enabled: Boolean, scopeReady: Boolean, excluded: Array<String>, allowed: Array<String>, protectedPackages: Array<String>) {
             enforceTrustedCaller()
-            if (excluded.size > 4096 || allowed.size > 4096) throw IllegalArgumentException("Too many policy entries")
-            nodePolicyBroker?.publish(enabled, excluded.toSet(), allowed.toSet() - nodeBridgeProtectedPackages)
+            if (excluded.size > 4096 || allowed.size > 4096 || protectedPackages.size > 4096) throw IllegalArgumentException("Too many policy entries")
+            nodePolicyBroker?.publish(enabled, scopeReady, excluded.toSet() + nodeBridgeProtectedPackages,
+                allowed.toSet() - nodeBridgeProtectedPackages, protectedPackages.toSet() + nodeBridgeProtectedPackages)
         }
 
         override fun requestXSpaceScopeSetup(): Boolean {
