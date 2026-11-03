@@ -62,11 +62,14 @@ if [ ! -f "$APP_FILES/store/store.json" ] && [ ! -f "$EXTERNAL_STORE" ]; then
     set_perm "$APP_FILES/.gkd" "$APP_UID" "$APP_UID" 0600
     restorecon -R "$APP_FILES" 2>/dev/null || true
     # Append only our service; retain every other accessibility service.
-    A11Y_SERVICE=li.songe.gkd/.service.A11yService
+    A11Y_SERVICE=$(cmd package query-services --brief --user 0 \
+        -a android.accessibilityservice.AccessibilityService -p "$GKD_PACKAGE" |
+        grep "^$GKD_PACKAGE/" | head -n 1)
+    case "$A11Y_SERVICE" in "$GKD_PACKAGE/"?*) ;; *) abort "Accessibility service lookup failed" ;; esac
     CURRENT_SERVICES=$(settings --user 0 get secure enabled_accessibility_services)
     [ "$CURRENT_SERVICES" = null ] && CURRENT_SERVICES=
     case ":$CURRENT_SERVICES:" in
-        *":$A11Y_SERVICE:"*|*":li.songe.gkd/li.songe.gkd.service.A11yService:"*) ;;
+        *":$A11Y_SERVICE:"*) ;;
         *) settings --user 0 put secure enabled_accessibility_services "${CURRENT_SERVICES:+$CURRENT_SERVICES:}$A11Y_SERVICE" || abort "Fresh bootstrap accessibility setup failed" ;;
     esac
     settings --user 0 put secure accessibility_enabled 1 || abort "Fresh bootstrap accessibility enable failed"
