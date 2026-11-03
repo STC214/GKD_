@@ -179,18 +179,22 @@ bool launch(JNIEnv* e,std::vector<char>& dex){
  e->DeleteLocalRef(type);e->DeleteLocalRef(name);e->DeleteLocalRef(instance);e->DeleteLocalRef(bytes);e->DeleteLocalRef(parent);e->DeleteLocalRef(loader);e->DeleteLocalRef(cl);return ok;
 }
 class GlobalModule : public zygisk::ModuleBase {
- zygisk::Api* api=nullptr;JNIEnv* env=nullptr;std::vector<char> dex;
+ zygisk::Api* api=nullptr;JNIEnv* env=nullptr;std::vector<char> dex;bool traceFixture=false;
 public:
  void onLoad(zygisk::Api* a,JNIEnv* e) override {api=a;env=e;}
  void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {try{pre(args);}catch(...){dex.clear();clear(env);log("pre-specialize stopped safely");}}
  void pre(zygisk::AppSpecializeArgs* args) {
   int uid=args->uid,user=uid/100000,id=uid%100000;
-  if(api->getFlags() & zygisk::PROCESS_ON_DENYLIST)return;
+  if(args->nice_name){const char* name=env->GetStringUTFChars(args->nice_name,nullptr);bool valid=clear(env);if(valid&&name){traceFixture=strcmp(name,"li.songe.gkd.globalfixture")==0;env->ReleaseStringUTFChars(args->nice_name,name);}}
+  // KernelSU's unmount/denylist advisory can include every non-root app. The host
+  // already controls whether this module is delivered. Do not turn that advisory
+  // into an extra target allowlist; use GKD's protected cache and live policy.
   if((user!=0&&user!=999)||id<10000||id>19999||!args->app_data_dir)return;
   const char* data=env->GetStringUTFChars(args->app_data_dir,nullptr);bool ok=clear(env);if(!ok||!data)return;
   std::string pkg;
   try{const char* slash=strrchr(data,'/');pkg=slash?slash+1:data;}catch(...){env->ReleaseStringUTFChars(args->app_data_dir,data);throw;}
   env->ReleaseStringUTFChars(args->app_data_dir,data);
+  if(traceFixture)__android_log_print(ANDROID_LOG_INFO,"GKD-GlobalBridge","fixture pre uid=%d package=%s hostFlags=%u",uid,pkg.c_str(),api->getFlags());
   if(protectedStatic(pkg))return;
   int fd=api->connectCompanion();if(fd<0)return;
   timeval timeout{1,0};setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
@@ -201,6 +205,7 @@ public:
   close(fd);
  }
  void postAppSpecialize(const zygisk::AppSpecializeArgs*) override {
+  if(traceFixture)__android_log_print(ANDROID_LOG_INFO,"GKD-GlobalBridge","fixture helper bytes=%zu",dex.size());
   if(dex.empty()){api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);return;}
   // Keep JNI callback code mapped for the life of the process, even if Java startup fails.
   try{if(launch(env,dex))log("global helper loaded");else{clear(env);log("global helper did not start");}}
