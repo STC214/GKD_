@@ -44,7 +44,7 @@
 
 随后向主 GKD PID 20801 发送 SIGTERM；在未发出启动命令的情况下，约 2.17 秒观测到新 PID 23732，6 秒后仍存活。恢复后 user0 / user999 均再次节点点击 `Verified`。设置、白名单与 HMA 哈希在本次恢复前后完全一致。该结果不区分 Android 服务重启与模块守护各自的贡献，也不代表 force-stop、全新安装或重启测试通过。
 
-证据分别位于 `local-assets/global-20261104-live-policy/live-transition-summary.json`、`local-assets/global-20261104-recovery/recovery-verification.json` 及同目录命令与节点/动作记录。测试包最后已停止。测试包已不在白名单；用户先前误选的可可影视仍在白名单，后续测试它之前应从 GKD 白名单移除。
+证据分别位于 `local-assets/global-20261104-live-policy/live-transition-summary.json`、`local-assets/global-20261104-recovery/recovery-verification.json` 及同目录命令与节点/动作记录。测试包最后已停止。最终只读检查确认：测试包和可可影视均不在 GKD 白名单，未遗留本次测试条目。
 
 ## 重启自动开工补测
 

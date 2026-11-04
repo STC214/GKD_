@@ -77,3 +77,18 @@ GKD_LOG_MAX_BYTES=262144
 卸载脚本只撤回本模块的后台保活策略、安装登记标记和生成的全局桥接保护缓存；不卸载 APK，不清应用数据，不删除用户规则／设置，不移除已有 999 用户登记。
 
 Native 代码已加载的进程通常需要重启才能彻底卸载。全局试验版升级前应保存当前 APK、实际模块文件、配置和哈希，并使用对应验证记录中的回退步骤；不要用其他设备或其他版本的备份覆盖用户配置。
+
+## 2.0 定制版分发与回归
+
+“关于”中的本项目发布入口同时提供 APK 与 Root 模块。定制版不从上游普通 APK 渠道自动覆盖更新；在线规则更新独立，保持原设置和作者来源。上游项目及支持入口单独保留。
+
+可选32位必须同时向构建、打包脚本传入 `-Include32Bit`；默认仍是12条目的双64位包。额外32位 ABI 仅有离线验证，不代表实机支持。
+
+主机回归（无 ADB）：
+
+```powershell
+python ksu-sukisu-module/tests/test_bootstrap_lookup.py
+python ksu-sukisu-module/tests/test_global_bridge_lifecycle.py --java-home $env:JAVA_HOME --repeat 30
+```
+
+后者使用 JVM Android 桩验证生命周期与失败关闭；6 个场景重复31轮，不替代 Android 私有 API 真机测试。

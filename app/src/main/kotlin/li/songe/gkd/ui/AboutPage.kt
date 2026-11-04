@@ -66,7 +66,7 @@ import li.songe.gkd.ui.style.EmptyHeight
 import li.songe.gkd.ui.style.itemPadding
 import li.songe.gkd.ui.style.titleItemPadding
 import li.songe.gkd.util.ISSUES_URL
-import li.songe.gkd.util.PLAY_STORE_URL
+import li.songe.gkd.util.AppDistribution
 import li.songe.gkd.util.REPOSITORY_URL
 import li.songe.gkd.util.ShortUrlSet
 import li.songe.gkd.util.UpdateChannelOption
@@ -206,10 +206,21 @@ fun AboutPage() {
                     mainVm.openUrl(REPOSITORY_URL)
                 },
             )
+            SettingItem(
+                imageVector = null,
+                title = "本项目发布与更新",
+                subtitle = "定制版请从发布页配套更新 APK 和 Root 模块",
+                onClick = { mainVm.openUrl(AppDistribution.releasesUrl) },
+            )
+            SettingItem(
+                imageVector = null,
+                title = "上游 GKD 项目",
+                onClick = { mainVm.openUrl(AppDistribution.upstreamRepositoryUrl) },
+            )
             if (META.isGkdChannel) {
                 SettingItem(
                     imageVector = null,
-                    title = "捐赠支持",
+                    title = "支持上游 GKD",
                     onClick = {
                         mainVm.navigateWebPage(ShortUrlSet.URL10)
                     },
@@ -350,8 +361,8 @@ fun AboutPage() {
                     }
                     context.saveFileToDownloads(getShareApkFile())
                 },
-                "Google Play" to {
-                    mainVm.openUrl(PLAY_STORE_URL)
+                "本项目发布页" to {
+                    mainVm.openUrl(AppDistribution.releasesUrl)
                 },
             )
         )
