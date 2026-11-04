@@ -2,7 +2,8 @@ param(
     [string]$OutputPath,
     [string]$ApkPath,
     [string]$ExpectedApkSha256,
-    [string]$GlobalBridgeDir
+    [string]$GlobalBridgeDir,
+    [switch]$Include32Bit
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,10 +18,16 @@ $distDir = Join-Path $moduleRoot "dist"
 if (-not $GlobalBridgeDir) { $GlobalBridgeDir = Join-Path $moduleRoot "global\build" }
 $GlobalBridgeDir = [System.IO.Path]::GetFullPath($GlobalBridgeDir)
 $globalPayloads = @(
-    @{ Source = "global_bridge.dex"; Entry = "common/global_bridge.dex"; Machine = 0 },
-    @{ Source = "arm64-v8a.so"; Entry = "zygisk/arm64-v8a.so"; Machine = 183 },
-    @{ Source = "x86_64.so"; Entry = "zygisk/x86_64.so"; Machine = 62 }
+    @{ Source = "global_bridge.dex"; Entry = "common/global_bridge.dex"; Machine = 0; ElfClass = 0 },
+    @{ Source = "arm64-v8a.so"; Entry = "zygisk/arm64-v8a.so"; Machine = 183; ElfClass = 2 },
+    @{ Source = "x86_64.so"; Entry = "zygisk/x86_64.so"; Machine = 62; ElfClass = 2 }
 )
+if ($Include32Bit) {
+    $globalPayloads += @(
+        @{ Source = "armeabi-v7a.so"; Entry = "zygisk/armeabi-v7a.so"; Machine = 40; ElfClass = 1 },
+        @{ Source = "x86.so"; Entry = "zygisk/x86.so"; Machine = 3; ElfClass = 1 }
+    )
+}
 $globalHashes = @{}
 foreach ($payload in $globalPayloads) {
     $source = Join-Path $GlobalBridgeDir $payload.Source
@@ -32,12 +39,23 @@ foreach ($payload in $globalPayloads) {
         if ($bytes.Length -lt 112 -or [Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne "dex`n" -or $bytes[7] -ne 0) { throw "Invalid global bridge DEX: $source" }
         if ([BitConverter]::ToUInt32($bytes, 32) -ne $bytes.Length) { throw "Global bridge DEX length mismatch: $source" }
     } else {
-        if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x7f -or [Text.Encoding]::ASCII.GetString($bytes, 1, 3) -ne "ELF" -or $bytes[4] -ne 2 -or $bytes[5] -ne 1) { throw "Expected ELF64 little-endian native bridge: $source" }
+        $headerSize = if ($payload.ElfClass -eq 1) { 52 } else { 64 }
+        if ($bytes.Length -lt $headerSize -or $bytes[0] -ne 0x7f -or [Text.Encoding]::ASCII.GetString($bytes, 1, 3) -ne "ELF" -or $bytes[4] -ne $payload.ElfClass -or $bytes[5] -ne 1) { throw "Expected ELF class $($payload.ElfClass) little-endian native bridge: $source" }
         if ([BitConverter]::ToUInt16($bytes, 16) -ne 3 -or [BitConverter]::ToUInt16($bytes, 18) -ne $payload.Machine) { throw "Native bridge ABI/type mismatch: $source" }
-        $phOffset = [BitConverter]::ToUInt64($bytes, 32)
-        $phSize = [BitConverter]::ToUInt16($bytes, 54)
-        $phCount = [BitConverter]::ToUInt16($bytes, 56)
-        if ([BitConverter]::ToUInt16($bytes, 52) -ne 64 -or $phSize -ne 56 -or $phCount -eq 0 -or $phOffset -gt $bytes.Length -or ($phSize * $phCount) -gt ($bytes.Length - $phOffset)) { throw "Invalid native bridge program headers: $source" }
+        if ($payload.ElfClass -eq 1) {
+            $phOffset = [uint64][BitConverter]::ToUInt32($bytes, 28)
+            $elfHeaderSize = [BitConverter]::ToUInt16($bytes, 40)
+            $phSize = [BitConverter]::ToUInt16($bytes, 42)
+            $phCount = [BitConverter]::ToUInt16($bytes, 44)
+            $expectedPhSize = 32
+        } else {
+            $phOffset = [BitConverter]::ToUInt64($bytes, 32)
+            $elfHeaderSize = [BitConverter]::ToUInt16($bytes, 52)
+            $phSize = [BitConverter]::ToUInt16($bytes, 54)
+            $phCount = [BitConverter]::ToUInt16($bytes, 56)
+            $expectedPhSize = 56
+        }
+        if ($elfHeaderSize -ne $headerSize -or $phSize -ne $expectedPhSize -or $phCount -eq 0 -or $phOffset -lt $headerSize -or $phOffset -gt $bytes.Length -or ($phSize * $phCount) -gt ($bytes.Length - $phOffset)) { throw "Invalid native bridge program headers: $source" }
     }
     $globalHashes[$payload.Entry] = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
 }
@@ -187,6 +205,7 @@ try {
         "zygisk/arm64-v8a.so",
         "zygisk/x86_64.so"
     )
+    if ($Include32Bit) { $expectedEntries += @("zygisk/armeabi-v7a.so", "zygisk/x86.so") }
     $actualEntries = @($entries | ForEach-Object { $_.FullName } | Sort-Object)
     $entryDifference = Compare-Object ($expectedEntries | Sort-Object) $actualEntries
     if ($entryDifference) {
