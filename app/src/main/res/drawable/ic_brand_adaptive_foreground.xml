@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Map the square artwork onto the 72/108 adaptive viewport; let the OS mask its corners. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
     android:drawable="@drawable/gkd_icon_art"
-    android:inset="29%" />
+    android:inset="16.67%" />

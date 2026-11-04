@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Keep the entire square artwork inside the circular Android splash safe area. -->
+<!-- Separate splash geometry: 46% square diagonal fits inside the 192/288 safe circle. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
     android:drawable="@drawable/gkd_icon_art"
-    android:inset="28%" />
+    android:inset="27%" />
