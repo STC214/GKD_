@@ -4,7 +4,7 @@
 
 模块 ID 为 `gkd_ksu_sukisu`。安装包包含同一份 GKD APK、主用户保活脚本，以及 arm64-v8a／x86_64 的全局节点桥接。此目录的全局实现仍需以对应版本的构建、重启和真机记录确认，不以编译成功替代实测。
 
-**当前正式版：[2.0.0](https://github.com/STC214/GKD_/releases/tag/v2.0.0)**，模块 versionCode `2026110402`，内嵌 APK `2.0.0 / 100`。配套成品位于仓库根目录 `dist/v2.0.0/`（本机归档），对外下载以 Release 附件为准。验证范围见 [发布说明](../docs/releases/v2.0.0.md) 与 Release 的 `verification-summary.md`。
+**当前正式版：[2.0.1](https://github.com/STC214/GKD_/releases/tag/v2.0.1)**，模块 versionCode `2026110403`，内嵌 APK `2.0.1 / 101`。配套成品位于仓库根目录 `dist/v2.0.1/`（本机归档），对外下载以 Release 附件为准。验证范围见 [发布说明](../docs/releases/v2.0.1.md) 与 Release 的 `verification-summary.md`。
 
 ## 生效模型
 

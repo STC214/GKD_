@@ -4,7 +4,7 @@
 
 基于 [上游 GKD](https://github.com/gkd-kit/gkd) 的 Android 自动点击定制版，保留高级选择器、订阅规则与原有数据兼容性，增加 Root／Zygisk 全局节点桥接和主用户保活。
 
-**当前正式版：[2.0.0（versionCode 100）](https://github.com/STC214/GKD_/releases/tag/v2.0.0)** · [发布说明](docs/releases/v2.0.0.md) · [全部发布](https://github.com/STC214/GKD_/releases)
+**当前正式版：[2.0.1（versionCode 101）](https://github.com/STC214/GKD_/releases/tag/v2.0.1)** · [发布说明](docs/releases/v2.0.1.md) · [全部发布](https://github.com/STC214/GKD_/releases)
 
 ## 主要功能
 
@@ -16,12 +16,12 @@
 
 ## 安装与更新
 
-从本仓库 [Release](https://github.com/STC214/GKD_/releases/tag/v2.0.0) 获取同版本配套产物：
+从本仓库 [Release](https://github.com/STC214/GKD_/releases/tag/v2.0.1) 获取同版本配套产物：
 
 | 文件 | 用途 |
 | --- | --- |
-| `gkd-2.0.0.apk` | GKD 定制版应用，版本 2.0.0／100 |
-| `gkd-ksu-2.0.0.zip` | 内嵌同一 APK 的 KernelSU／SukiSU 模块，版本 2.0.0／2026110402 |
+| `gkd-2.0.1.apk` | GKD 定制版应用，版本 2.0.1／101 |
+| `gkd-ksu-2.0.1.zip` | 内嵌同一 APK 的 KernelSU／SukiSU 模块，版本 2.0.1／2026110403 |
 | `SHA256SUMS.txt` | 下载后完整性核对 |
 | `verification-summary.md`、`release.diff` | 验证摘要与相对上一公开版的源码差异 |
 
@@ -36,6 +36,10 @@
 定制版的更新入口指向本项目发布页，不从上游普通 APK 渠道自动覆盖更新；在线规则更新独立、不受影响。卸载本模块不卸载 GKD APK、不清用户数据；已经加载的 Native 桥接需按宿主要求重启才能卸载。
 
 ## 验证状态与边界
+
+2.0.1修正自适应彩色／主题图标过大留白，启动页使用独立比例；不改原PNG、通知向量、Root或Native。预览101已完成实际桌面目视与100↔101回退；正式标签构建、部署及附件校验以[2.0.1发布说明](docs/releases/v2.0.1.md)和Release验证摘要为准。主题单色／启动页逐资源日夜真机渲染未完成，不把静态检查当作实测通过。
+
+以下保留2.0.0功能基线（非2.0.1重新执行）：
 
 2.0.0 干净标签构建通过 255 项 JVM 测试；Lint 0 错误、58 项警告。主机生命周期 6 个场景各执行 31 轮，安装器服务查找 7 个场景通过；Android 17 ARM64 实机完成 `99 → 100 → 99 → 100` 升级／回退，三个阶段均验证主用户和 999 分身的节点自动点击，配置、规则、白名单和 HMA 保持不变。
 
@@ -55,7 +59,7 @@ Android 工程直接位于仓库根目录。使用 JDK 21、Android SDK 和项�
 
 打包脚本默认从 Gradle `output-metadata.json` 读取 APK 文件，输出到 `ksu-sukisu-module/dist/`；可通过 `-ApkPath`、`-ExpectedApkSha256`、`-OutputPath` 显式指定。模块版本取自 `module/module.prop`，不随打包时间自动改写。
 
-发布成品单独归档到根目录 `dist/v2.0.0/`，包含 APK、模块 ZIP、校验和、差异与验证摘要；GitHub 下载以 Release 附件为准。`dist/`、`local-assets/`、模块 `work/`／`global/build/` 和构建缓存不纳入 Git。私人备份、第三方 APK 与真机原始日志不上传 Release。
+发布成品单独归档到根目录 `dist/v2.0.1/`，包含 APK、模块 ZIP、校验和、差异与验证摘要；GitHub 下载以 Release 附件为准。`dist/`、`local-assets/`、模块 `work/`／`global/build/` 和构建缓存不纳入 Git。私人备份、第三方 APK 与真机原始日志不上传 Release。
 
 ```text
 app/                    Android 应用
@@ -63,11 +67,11 @@ selector/               高级选择器
 hidden_api/             Android 隐藏 API 声明
 ksu-sukisu-module/      Root 保活与 Zygisk 全局桥接
 docs/                   设计、历史实施记录与发布说明
-dist/v2.0.0/            本机已验证发布成品（Git 忽略）
+dist/v2.0.1/            本机已验证发布成品（Git 忽略）
 local-assets/           私人备份与诊断证据（Git 忽略）
 ```
 
-[当前进度索引](docs/current-progress.md) 保留历史记录；当前公开基线以 [2.0.0 发布说明](docs/releases/v2.0.0.md) 和 Release 验证摘要为准，不把早期阶段表当作最新停点。
+[当前进度索引](docs/current-progress.md) 保留历史记录；当前公开基线以 [2.0.1 发布说明](docs/releases/v2.0.1.md) 和 Release 验证摘要为准，不把早期阶段表当作最新停点。
 
 ## 来源与许可
 

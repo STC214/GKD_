@@ -1,6 +1,6 @@
-# 2.0.1 图标比例修正（本地验证版，未发布）
+# 2.0.1 图标比例修正与验证边界
 
-APK版本2.0.1／101，模块版本2.0.1／2026110403；当前公开Release仍为2.0.0，不替换旧附件或移动旧标签。本次仅调整资源留白和版本元数据，不修改规则、Root／Native、HMA或授权。
+APK版本2.0.1／101，模块版本2.0.1／2026110403；正式发布见[2.0.1发布说明](releases/v2.0.1.md)，不替换2.0.0附件或移动旧标签。本次仅调整资源留白和版本元数据，不修改规则、Root／Native、HMA或授权。
 
 ## 问题与修正
 
@@ -10,10 +10,14 @@ APK版本2.0.1／101，模块版本2.0.1／2026110403；当前公开Release仍�
 
 依据：[Android自适应图标](https://developer.android.com/develop/ui/compose/system/icon_design_adaptive)、[AdaptiveIconDrawable视口](https://developer.android.com/reference/android/graphics/drawable/AdaptiveIconDrawable)、[SplashScreen尺寸](https://developer.android.com/reference/androidx/core/splashscreen/SplashScreen)。不同桌面主题包仍可能覆盖应用图标；不清除用户桌面数据。
 
-## 验证与产物安排
+## 预览版已完成验证（ee343da，不冒充正式标签包）
 
 新增6项资源比例／引用回归，完整261项JVM通过，Lint0错误／58警告；APK／模块字节一致、签名及编译资源内缩值校验通过，原PNG与包内像素未变。真机100→101→100→101覆盖更新和回退通过，最终为`2.0.1-ee343da / 101`；配置、规则、白名单、HMA及UID保持不变。实际桌面前后截图已目视确认：图案铺满原图标范围，不再套着大圈蓝色留白。
 
 真机日夜间单色／启动页逐资源渲染未通过：Root及Shell探针被系统终止（exit137），临时验证应用安装被系统取消，未绕过限制。单色与启动页仅完成编译资源引用／比例及安全区几何检查，不冒充实际渲染通过。本轮7项远端临时文件／目录已清理；手机未安装iconprobe或globalfixture测试应用。完整字面输出与边界见本机`local-assets/icon-20261104-v101/verification.json`及引用记录。
 
-成品已单独归档`dist/v2.0.1-iconfix/`，保留2.0.0基线与实际执行过的可运行回退。没有新的Native字节，本轮未重启手机；未推送或发布新Release。APK的干净构建源码为`ee343da`，后续仅文档提交不重新打包、不改变其源码标识。
+预览成品已单独归档`dist/v2.0.1-iconfix/`，保留2.0.0基线与实际执行过的可运行回退。没有新的Native字节，预览批次未重启手机、未推送或发布。APK的干净构建源码为`ee343da`，后续仅文档提交不重新打包、不改变其源码标识。
+
+## 正式包复审
+
+本轮追加资源回归盲点：启动页整数像素取整、日夜主题引用、Manifest桌面/快捷设置分离及通知默认图标；没有为增加改动而修改已验证的Root／Native实现。正式包从干净v2.0.1标签构建，具体测试数量、部署、回退和附件哈希以Release验证摘要为准。正式成品位于`dist/v2.0.1/`；旧预览包不是本次Release附件。
