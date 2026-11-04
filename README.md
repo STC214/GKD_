@@ -1,90 +1,79 @@
-# gkd
+# GKD Global Bridge
 
-<p align="center">
-<a href="https://gkd.li/"><img src="https://e.gkd.li/2a0a7787-f2dd-4529-a885-93f3b8c857c3" alt="GKD.LI" width="40%" /></a>
-</p>
+基于 [上游 GKD](https://github.com/gkd-kit/gkd) 的 Android 自动点击定制版，保留高级选择器、订阅规则与原有数据兼容性，增加 Root／Zygisk 全局节点桥接和主用户保活。
 
-基于 [高级选择器](https://gkd.li/guide/selector) + [订阅规则](https://gkd.li/guide/subscription) + [快照审查](https://github.com/gkd-kit/inspect) 的自定义屏幕点击 Android 应用
+**当前正式版：[2.0.0（versionCode 100）](https://github.com/STC214/GKD_/releases/tag/v2.0.0)** · [发布说明](docs/releases/v2.0.0.md) · [全部发布](https://github.com/STC214/GKD_/releases)
 
-通过自定义规则，在指定界面，满足指定条件(如屏幕上存在特定文字)时，点击特定的节点或位置或执行其他操作
+## 主要功能
 
-- **快捷操作**
+- 普通应用通过全局 Zygisk 桥接进入 GKD 策略，不需要逐个勾选 LSPosed 作用域；GKD 白名单、检测应用文件夹和内部保护包控制实际生效范围。
+- 主用户（user 0）与 XSpace／999 共用主用户的一套匹配引擎，不要求双开 GKD。系统、隔离、共享 UID 等身份不明确的进程保持排除。
+- 基于系统节点和规则匹配执行点击，不依赖截图／OCR，不修改 HMA 隐藏预设。目标没有可用节点或规则不匹配时不保证跳过。
+- 默认含本地公告规则和在线订阅快照；在线规则仍可更新，升级保留用户规则、配置及白名单。
+- 模块支持首次安装初始化、有界 Root 授权等待、开机解锁后自动启动与低频保活；已有配置不会被安装脚本重新开启或重写。
 
-  帮助你简化一些重复的流程, 如某些软件自动确认电脑登录
+## 安装与更新
 
-- **跳过流程**
+从本仓库 [Release](https://github.com/STC214/GKD_/releases/tag/v2.0.0) 获取同版本配套产物：
 
-  某些软件可能在启动时存在一些烦人的流程, 这个软件可以帮助你点击跳过这个流程
+| 文件 | 用途 |
+| --- | --- |
+| `gkd-2.0.0.apk` | GKD 定制版应用，版本 2.0.0／100 |
+| `gkd-ksu-2.0.0.zip` | 内嵌同一 APK 的 KernelSU／SukiSU 模块，版本 2.0.0／2026110402 |
+| `SHA256SUMS.txt` | 下载后完整性核对 |
+| `verification-summary.md`、`release.diff` | 验证摘要与相对上一公开版的源码差异 |
 
-## 免责声明
+1. 准备可工作的 KernelSU／SukiSU Root 环境及已启用的兼容 Zygisk 宿主。
+2. 在 Root 管理器安装配套模块 ZIP；安装器会安装／覆盖更新主用户 APK。升级前建议备份，不要先卸载 GKD。
+3. 按宿主要求重启并解锁一次。首次安装时，在 Root 管理器批准 GKD 自身的 Root 请求；这次确认仍需用户完成。
+4. 首次模块安装在没有内／外存配置时初始化 Root＋无障碍路线，并保留其他无障碍服务。已有配置保持原样；沿用 Shizuku 自动化模式的用户仍需保留原 Shizuku 授权。
+5. 在 GKD 中管理规则与白名单。全局路线不要求开启 GKD 的 LSPosed 模块、不要求逐个选择目标应用，也不要求安装第二套 GKD 引擎。
 
-**本项目遵循 [GPL-3.0](/LICENSE) 开源，项目仅供学习交流，禁止用于商业或非法用途**
+只安装 APK 不等同于完成全局模块安装，也不会隐式完成模块首次初始化。普通 Root 授权与 Zygisk 宿主可用性是两个不同条件。详细配置、日志、卸载与回退见 [模块 README](ksu-sukisu-module/README.md)。
 
-## 安装
+定制版的更新入口指向本项目发布页，不从上游普通 APK 渠道自动覆盖更新；在线规则更新独立、不受影响。卸载本模块不卸载 GKD APK、不清用户数据；已经加载的 Native 桥接需按宿主要求重启才能卸载。
 
-<a href="https://gkd.li/guide/"><img src="https://e.gkd.li/f23b704d-d781-494b-9719-393f95683b89" alt="Download from GKD.LI" width="32%" /></a><a href="https://play.google.com/store/apps/details?id=li.songe.gkd"><img src="https://e.gkd.li/f63fabeb-0342-4961-a46d-cac61b0f8856" alt="Download from Google Play" width="32%" /></a><a href="https://github.com/gkd-kit/gkd/releases"><img src="https://e.gkd.li/c1ef2bb9-7472-46d5-9806-81b4c37e5b4d" alt="Download from GitHub releases" width="32%" /></a>
+## 验证状态与边界
 
-如遇问题请先查看 [疑难解答](https://gkd.li/guide/faq)
+2.0.0 干净标签构建通过 255 项 JVM 测试；Lint 0 错误、58 项警告。主机生命周期 6 个场景各执行 31 轮，安装器服务查找 7 个场景通过；Android 17 ARM64 实机完成 `99 → 100 → 99 → 100` 升级／回退，三个阶段均验证主用户和 999 分身的节点自动点击，配置、规则、白名单和 HMA 保持不变。
 
-## KernelSU / SukiSU Ultra 模块
+2.0 Native DEX／SO 与已完成重启自动开工、白名单即时切换、真实开屏及“朕知道了”公告点击验证的 v99 字节一致；这些属于 v99 功能基线，2.0 未重复重启或真实公告测试。完整范围见 [Release 验证摘要](https://github.com/STC214/GKD_/releases/download/v2.0.0/verification-summary.md)。
 
-本 fork 额外提供一个内置 GKD APK 的 KernelSU / SukiSU Ultra 模块：刷入时将 APK 安装到配置的 Android 用户（默认 user 0），移除模块时卸载该用户下的 GKD。模块不会自动授予 App 权限或开启无障碍。手机开机或重启后，模块等待系统服务就绪，再检查 GKD 进程并按需拉起；也设置后台运行 AppOps 和电池白名单。
+默认包含 arm64-v8a／x86_64 双 64 位载荷；x86_64 仅构建及 ELF 结构验证，可选 32 位不在本次默认包中，未作实机支持承诺。全局路线仅承诺已验证的 user0／999 常规应用范围，不代表全部 Android 用户、厂商 ROM 或应用界面都能处理。
 
-Android 工程现已直接位于仓库根目录，不再使用额外的 `GKD_/` 嵌套目录。`app/`、`gradle/`、`selector/`、`hidden_api/` 和 `ksu-sukisu-module/` 均可从仓库根目录直接访问，本文后续命令也都以仓库根目录为当前目录。
+## 开发与产物目录
 
-模块源码位于 [`ksu-sukisu-module/`](ksu-sukisu-module/)，在 Windows 下可从仓库根目录执行：
+Android 工程直接位于仓库根目录。使用 JDK 21、Android SDK 和项目配置的 NDK／Gradle 环境；先构建 APK，再构建桥接和打包（详细环境与可选 ABI 参数见模块 README）：
 
 ```powershell
+.\gradlew.bat :app:testGkdDebugUnitTest :app:lintGkdRelease :selector:jvmTest :app:assembleGkdRelease
+.\ksu-sukisu-module\scripts\build-global-bridge.ps1
 .\ksu-sukisu-module\scripts\package-ksu-module.ps1
 ```
 
-生成的可刷入模块包位于：
+打包脚本默认从 Gradle `output-metadata.json` 读取 APK 文件，输出到 `ksu-sukisu-module/dist/`；可通过 `-ApkPath`、`-ExpectedApkSha256`、`-OutputPath` 显式指定。模块版本取自 `module/module.prop`，不随打包时间自动改写。
+
+发布成品单独归档到根目录 `dist/v2.0.0/`，包含 APK、模块 ZIP、校验和、差异与验证摘要；GitHub 下载以 Release 附件为准。`dist/`、`local-assets/`、模块 `work/`／`global/build/` 和构建缓存不纳入 Git。私人备份、第三方 APK 与真机原始日志不上传 Release。
 
 ```text
-ksu-sukisu-module\dist\gkd-ksu-sukisu-module.zip
-```
-
-模块版本号使用打包时的分钟级时间戳；APK 从 `app/build/outputs/apk/gkd/release/app-gkd-release.apk` 取用，也可通过 `-ApkPath` 指定。安装和卸载目标用户可在配置中调整。移除模块时卸载 GKD（该用户下的 App 数据也会随系统卸载处理），并恢复后台 AppOps、清理电池白名单。刷入后如需调整，可编辑：
-
-```text
-/data/adb/modules/gkd_ksu_sukisu/config.conf
-```
-
-先构建 release APK，再运行打包命令；ZIP 内含 `common/gkd.apk`，打包脚本会校验 APK 条目。详细配置和日志说明见 [`ksu-sukisu-module/README.md`](ksu-sukisu-module/README.md)。
-
-## 项目目录
-
-```text
-app/                    GKD Android 应用
-docs/                   本 fork 的设计与实施文档
-gradle/                 Gradle Wrapper 配置
+app/                    Android 应用
+selector/               高级选择器
 hidden_api/             Android 隐藏 API 声明
-selector/               GKD 选择器模块
-ksu-sukisu-module/      内置 GKD APK 的 KernelSU/SukiSU 保活模块
-local-assets/           本机辅助资料，不纳入 Git
-  packages/             LSPosed、Sui 等第三方安装包
-  device/               设备专用配置
-  diagnostics/          真机诊断日志
+ksu-sukisu-module/      Root 保活与 Zygisk 全局桥接
+docs/                   设计、历史实施记录与发布说明
+dist/v2.0.0/            本机已验证发布成品（Git 忽略）
+local-assets/           私人备份与诊断证据（Git 忽略）
 ```
 
-`local-assets/` 只用于本机排障和保存外部依赖，不参与 Android 构建或模块打包。Gradle 生成目录及 `ksu-sukisu-module/dist/`、`work/` 同样保持 Git 忽略。
+[当前进度索引](docs/current-progress.md) 保留历史记录；当前公开基线以 [2.0.0 发布说明](docs/releases/v2.0.0.md) 和 Release 验证摘要为准，不把早期阶段表当作最新停点。
 
-## 开发路线
+## 来源与许可
 
-后续开发统一使用以下文档：
+本项目基于上游 [GKD](https://github.com/gkd-kit/gkd)，按仓库 [GPL-3.0 许可证](LICENSE) 分发；保留上游来源、许可证与规则作者元数据。选择器、订阅格式和基础使用方法可参考 [上游文档](https://gkd.li/guide/)。
 
-- [`docs/current-progress.md`](docs/current-progress.md)：汇总当前已完成阶段、构建与真机状态、未提交工作区内容和下一步任务。
-- [`docs/root-runtime-refactor-plan.md`](docs/root-runtime-refactor-plan.md)：规定窗口判断、规则调度、动作执行和 APK 内置 root 服务的实施顺序、验收标准与回滚点。
-- [`docs/upstream-code-delta-guide.md`](docs/upstream-code-delta-guide.md)：逐项记录本 fork 与官方 GKD 的代码级差异、行为不变量、冲突风险和上游更新后的迁移方法。
-- [`docs/testing/root-runtime-baseline.md`](docs/testing/root-runtime-baseline.md)：记录阶段 0 的 APK、签名、真实规则复现集、固定窗口场景和订阅兼容验收结果。
+## 上游界面示例
 
-每个开发阶段都必须同步更新代码差异文档；代码完成但差异记录未更新时，不得将该阶段标记为完成。两份文档共同要求保持现有规则格式、选择器语法、订阅更新、数据库和备份兼容。
-
-当前进度：阶段 0.5～7 已完成。APK 已固定 libsu 6.0.0，并把坐标动作接入显式 `APK RootService → Shizuku/Sui → 无障碍手势` 顺序。Android 16 真机已通过协议 2 常规连接、无 Shizuku 完整规则链、有界自动重连、开关停连、拒绝/8 秒无回调、撤权后进程死亡收口、无障碍回退、保留数据更新和重新授权恢复。SukiSU 外部撤权不会追溯结束既有 UID 0 进程，因此界面明确提示：需要立即撤权时先关闭 GKD 的 Root 增强开关。规则格式、订阅更新、数据库和备份结构均未改变。
-
-最新停点已经记录在 `docs/current-progress.md` 的“本轮开发停点”；阶段 7 不再重复，后续从阶段 8 的多用户、多显示屏与厂商窗口适配开始。
-
-## 截图
+以下为上游历史截图，定制版图标、设置和版本信息以当前安装包为准。
 
 |                                                               |                                                               |                                                               |                                                               |
 | ------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- |
@@ -93,7 +82,7 @@ local-assets/           本机辅助资料，不纳入 Git
 
 ## 订阅
 
-GKD **默认不提供规则**，需自行添加本地规则，或者通过订阅链接的方式获取远程规则
+本定制版默认包含本地规则与既有在线订阅快照：`667/v575`，973 个应用、3 个全局组，另含本地公告规则。保留规则作者元数据，支持后续在线订阅更新和自定义规则；已有用户升级时不覆盖其设置。规则存在不代表每个界面必定匹配。
 
 也可通过 [subscription-template](https://github.com/gkd-kit/subscription-template) 快速构建自己的远程订阅
 
@@ -123,14 +112,14 @@ GKD **默认不提供规则**，需自行添加本地规则，或者通过订阅
 
 </details>
 
-## 捐赠
+## 支持上游
 
-如果 GKD 对你有用, 可以通过以下链接支持该项目
+本项目基于上游 GKD，以下链接用于支持上游作者，并非本 fork 的收款入口。
 
 <https://github.com/lisonge/sponsor>
 
-或前往 [Google Play](https://play.google.com/store/apps/details?id=li.songe.gkd) 给个好评
+上游普通版另见 [gkd-kit/gkd](https://github.com/gkd-kit/gkd)；安装本定制版请使用本仓库 Release，避免覆盖掉配套桥接功能。
 
 ## Star History
 
-[![Stargazers over time](https://starchart.cc/gkd-kit/gkd.svg?variant=adaptive)](https://starchart.cc/gkd-kit/gkd)
+[![Stargazers over time](https://starchart.cc/STC214/GKD_.svg?variant=adaptive)](https://starchart.cc/STC214/GKD_)
