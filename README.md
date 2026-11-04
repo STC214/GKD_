@@ -1,5 +1,7 @@
 # GKD Global Bridge
 
+**文档导航：** [完整索引](docs/README.md) · [当前架构与维护契约](docs/global-bridge-runtime.md) · [2.0 验证矩阵](docs/testing/global200-release.md)。历史计划与旧发布记录已逐份标注适用版本。
+
 基于 [上游 GKD](https://github.com/gkd-kit/gkd) 的 Android 自动点击定制版，保留高级选择器、订阅规则与原有数据兼容性，增加 Root／Zygisk 全局节点桥接和主用户保活。
 
 **当前正式版：[2.0.0（versionCode 100）](https://github.com/STC214/GKD_/releases/tag/v2.0.0)** · [发布说明](docs/releases/v2.0.0.md) · [全部发布](https://github.com/STC214/GKD_/releases)

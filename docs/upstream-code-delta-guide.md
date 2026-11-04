@@ -1,5 +1,27 @@
 # GKD Root 加强版与官方版代码差异及上游整合手册
 
+## 0. 2.0 当前差异增量（2026-11-04，CURRENT）
+
+源码基线：标签`v2.0.0`／`94998d38c7f745489ef267a4725544b038cc83cf`。本节及[现行架构](global-bridge-runtime.md)优先于下方早期快照；下文`CURRENT`／`WORKTREE`／`PLANNED`仅按其章节记录日期解释，不能把历史工作区状态当成当前未提交内容。
+
+| 范围 | 当前源码/契约 | 上游合并时必须保留 |
+| --- | --- | --- |
+| 全局加载 | `ksu-sukisu-module/global/native/global_bridge.cpp`与`global/java/li/songe/gkd/global/GlobalBridge.java` | 支持身份/保护包门禁、宿主失败隔离、生命周期和租约失效；不以KernelSU的denylist建议位单独跳过普通App |
+| Root协议/门禁 | `root/IRootService.aidl`协议7、`GkdRootService`、`RootNodePolicyBroker`、`RootNodeBridgePolicy`、`CrossUserNodeLease` | UID0对端认证、真实目标UID/包映射、user0/999范围、共享UID拒绝、唯一主引擎；发布`GKDGLOBAL1`就绪缓存 |
+| 白名单与检测目录 | `NodeScopePolicy`及现有设置/策略发布链 | 已连接进程可撤销/恢复、策略未知不放行；HMA不改、检测目录排除；不把旧LSP作用域当全局路线必需条件 |
+| 首次Root | `RootServiceClient`、`RootServiceLifecycle`、`RootPermissionWaitBudget` | 异步获取Root，非Root缓存Shell重试前关闭；授权等待与服务握手超时分开；owner模块引导最多20次/5分钟，成功写`module_root_ready_v1`，用户关闭则停止 |
+| 前台恢复 | `ForegroundSnapshot.canRecoverMissingRoot`与规则引擎有限确认 | 聚焦可见运行任务的缺窗口仅取得重采样资格，不直接取得动作资格；PiP/错误用户/未知目标仍拒绝 |
+| 默认订阅 | `BundledDefaultRules`及打包快照 | ID -2与667独立，先保留已有文件/元数据；完成标记后尊重用户删除；不得合并ID破坏在线更新 |
+| fork分发 | `AppDistribution`、`App`、`Constants`、`AboutPage` | 本fork仓库/releases/源码链接；禁用上游普通APK自动替换；在线订阅更新独立，上游署名/支持保留 |
+| 模块安装与卸载 | `customize.sh`、`service.sh`、`uninstall.sh`、`module.prop` | 安装目标与引擎固定owner0；无配置才引导，Root批准仍需用户；卸载不卸APK/数据；模块版本来自module.prop，不再按时间戳生成 |
+| 打包/兼容 | 构建和打包PowerShell脚本 | 默认12条目、双64位、内嵌APK字节一致；32位仅显式opt-in，不当作已实测支持 |
+
+上述文件的`root/`相对`app/src/main/kotlin/li/songe/gkd/`，AIDL相对`app/src/main/aidl/li/songe/gkd/`。兼容入口`NodeScopeSetup`与LSP代码仍可能存在；代码存在不等于正常用户需要启用它。
+
+合并上游前以当前标签建立三方比较；Java/Native/Root接口必须成套处理，不单独替换APK或只搬旧AIDL。回归至少包含255项JVM、7项安装器查找、6场景×31轮主机生命周期、双用户节点与即时策略门禁；Native变化另外要求重启验证。完整现有结果和未覆盖项见[2.0测试矩阵](testing/global200-release.md)。旧版Bitmap/截图资源释放修复仍应保留，但它们不意味着全局跳过采用截图/OCR。
+
+## 历史差异手册
+
 ## 1. 文档定位
 
 本文档是本 fork 的长期维护手册，用于回答以下问题：

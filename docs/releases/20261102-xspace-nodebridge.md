@@ -1,4 +1,6 @@
-﻿# XSpace 999 node bridge trial — 2026-11-02
+# XSpace 999 node bridge trial — 2026-11-02
+
+> **历史版本发布说明。** 本文描述当时LSPosed/模块/测试状态，不是当前使用指南；2.0全局Zygisk路线不再要求逐应用作用域，卸载模块保留APK/数据，真实公告已在v99自然触发验证。原发布边界和产物身份不改写。当前请看[2.0发布说明](v2.0.0.md)、[文档索引](../README.md)与[验证矩阵](../testing/global200-release.md)。
 
 ## Architecture
 

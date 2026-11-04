@@ -1,5 +1,7 @@
 # GKD Root／Zygisk 全局节点桥接模块
 
+文档同步：2026-11-04。[完整索引](../docs/README.md) 汇总当前与历史文档；[架构契约](../docs/global-bridge-runtime.md) 说明 Native／Root／引擎边界，[2.0 验证矩阵](../docs/testing/global200-release.md) 区分 v99 功能基线与 v100 实测。卸载、首次授权和数据保留行为以本 README 及对应源码为准，旧版本发布说明仅作历史记录。
+
 模块 ID 为 `gkd_ksu_sukisu`。安装包包含同一份 GKD APK、主用户保活脚本，以及 arm64-v8a／x86_64 的全局节点桥接。此目录的全局实现仍需以对应版本的构建、重启和真机记录确认，不以编译成功替代实测。
 
 **当前正式版：[2.0.0](https://github.com/STC214/GKD_/releases/tag/v2.0.0)**，模块 versionCode `2026110402`，内嵌 APK `2.0.0 / 100`。配套成品位于仓库根目录 `dist/v2.0.0/`（本机归档），对外下载以 Release 附件为准。验证范围见 [发布说明](../docs/releases/v2.0.0.md) 与 Release 的 `verification-summary.md`。
