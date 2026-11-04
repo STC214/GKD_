@@ -320,4 +320,26 @@ class ForegroundSnapshotTest {
         assertTrue(missingTaskActivity.canUseEventActivityFallback("host.app"))
         assertFalse(missingTaskActivity.canUseEventActivityFallback("other.app"))
     }
+
+    @Test fun focusedTaskBeforeWindowCanOnlyRequestRecovery() {
+        val snapshot = resolveForegroundSnapshot(task, emptyList(), 0, 100L)
+        assertTrue(snapshot.canRecoverMissingRoot)
+        assertFalse(snapshot.canExecute)
+    }
+
+    @Test fun missingWindowDoesNotAuthorizeBackgroundOrPictureInPictureRecovery() {
+        for (candidate in listOf(task.copy(isFocused = false), task.copy(isVisible = false),
+            task.copy(isRunning = false), task.copy(isPictureInPicture = true))) {
+            val snapshot = resolveForegroundSnapshot(candidate, emptyList(), 0, 100L)
+            assertFalse(snapshot.canRecoverMissingRoot)
+            assertFalse(snapshot.canExecute)
+        }
+    }
+
+    @Test fun focusedOverlayDoesNotBecomeRecoverableMissingApplicationWindow() {
+        val snapshot = resolveForegroundSnapshot(task,
+            listOf(window(44, null, focused = true, kind = ForegroundWindowKind.AccessibilityOverlay)), 0, 100L)
+        assertFalse(snapshot.canRecoverMissingRoot)
+        assertFalse(snapshot.canExecute)
+    }
 }

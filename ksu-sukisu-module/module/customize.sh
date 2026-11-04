@@ -54,6 +54,20 @@ if [ ! -f "$APP_FILES/store/store.json" ] && [ ! -f "$EXTERNAL_STORE" ]; then
     pm grant --user 0 "$GKD_PACKAGE" android.permission.WRITE_SECURE_SETTINGS || abort "Fresh bootstrap secure-settings grant failed"
     pm grant --user 0 "$GKD_PACKAGE" android.permission.POST_NOTIFICATIONS 2>/dev/null || true
     cmd appops set --user 0 "$GKD_PACKAGE" android:foreground_service_special_use allow 2>/dev/null || true
+    # Append only our service; retain every other accessibility service.
+    # --brief may indent the component below human-readable service metadata.
+    # Parse its first field, not column zero; allow bounded PackageManager settling.
+    A11Y_SERVICE=
+    A11Y_LOOKUP_ATTEMPT=0
+    while [ "$A11Y_LOOKUP_ATTEMPT" -lt 5 ]; do
+        A11Y_SERVICE=$(cmd package query-services --brief --user 0 \
+            -a android.accessibilityservice.AccessibilityService -p "$GKD_PACKAGE" |
+            awk -v prefix="$GKD_PACKAGE/" 'NF == 1 && index($1, prefix) == 1 { print $1; exit }')
+        case "$A11Y_SERVICE" in "$GKD_PACKAGE/"?*) break ;; esac
+        A11Y_LOOKUP_ATTEMPT=$((A11Y_LOOKUP_ATTEMPT + 1))
+        [ "$A11Y_LOOKUP_ATTEMPT" -ge 5 ] || sleep 1
+    done
+    case "$A11Y_SERVICE" in "$GKD_PACKAGE/"?*) ;; *) abort "Accessibility service lookup failed" ;; esac
     mkdir -p "$APP_FILES"
     printf '1\n' > "$APP_FILES/module_bootstrap_v1"
     touch "$APP_FILES/.gkd"
@@ -61,11 +75,6 @@ if [ ! -f "$APP_FILES/store/store.json" ] && [ ! -f "$EXTERNAL_STORE" ]; then
     set_perm "$APP_FILES/module_bootstrap_v1" "$APP_UID" "$APP_UID" 0600
     set_perm "$APP_FILES/.gkd" "$APP_UID" "$APP_UID" 0600
     restorecon -R "$APP_FILES" 2>/dev/null || true
-    # Append only our service; retain every other accessibility service.
-    A11Y_SERVICE=$(cmd package query-services --brief --user 0 \
-        -a android.accessibilityservice.AccessibilityService -p "$GKD_PACKAGE" |
-        grep "^$GKD_PACKAGE/" | head -n 1)
-    case "$A11Y_SERVICE" in "$GKD_PACKAGE/"?*) ;; *) abort "Accessibility service lookup failed" ;; esac
     CURRENT_SERVICES=$(settings --user 0 get secure enabled_accessibility_services)
     [ "$CURRENT_SERVICES" = null ] && CURRENT_SERVICES=
     case ":$CURRENT_SERVICES:" in

@@ -370,7 +370,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 synchronized(foregroundConfirmationState) { foregroundRetryJob = null }
                 // Re-sample before startQueryJob checks the old Activity's rule set.
                 // This lets a static transition from a no-rule app enter a rule app.
-                getConfirmedForeground(null) ?: return@launch
+                getConfirmedForeground(null, allowMissingRootRecovery = true) ?: return@launch
                 startQueryJob()
             }
         }

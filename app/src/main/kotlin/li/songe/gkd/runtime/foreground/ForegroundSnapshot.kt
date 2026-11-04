@@ -55,19 +55,20 @@ data class ForegroundSnapshot(
                 surface == ForegroundSurface.Application
 
     /**
-     * A focused application window may exist briefly before its accessibility root mounts.
+     * A focused task may precede its window, and a window may precede its root.
      * This state may request bounded recovery, but must never execute a rule directly.
      */
     val canRecoverMissingRoot: Boolean
         get() = confidence == ForegroundConfidence.Probable &&
-                surface == ForegroundSurface.Application &&
                 task?.appId != null &&
                 task.isFocused &&
                 task.isVisible &&
                 task.isRunning &&
-                window?.kind == ForegroundWindowKind.Application &&
-                window.isFocused &&
-                window.rootAppId == null
+                !task.isPictureInPicture &&
+                ((window == null && surface == ForegroundSurface.Unknown) ||
+                    (surface == ForegroundSurface.Application &&
+                        window?.kind == ForegroundWindowKind.Application &&
+                        window.isFocused && window.rootAppId == null))
 
     /** Task-stack Activity is authoritative; accessibility events are fallback only. */
     fun canUseEventActivityFallback(eventAppId: String): Boolean {

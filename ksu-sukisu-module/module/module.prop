@@ -1,6 +1,6 @@
 id=gkd_ksu_sukisu
 name=GKD KernelSU/SukiSU Bundle + Keepalive
-version=20261103.6-global-trial
-versionCode=2026110306
+version=20261104.1-global-trial
+versionCode=2026110401
 author=STC214
 description=GKD global Zygisk node bridge with internal whitelist and owner-only matching. No per-app LSPosed scopes. Uninstall retains APK and app data.

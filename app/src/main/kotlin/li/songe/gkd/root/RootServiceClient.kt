@@ -7,6 +7,7 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import android.os.Handler
 import android.os.Looper
+import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ipc.RootService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +21,7 @@ sealed interface RootServiceState {
     data class Failed(
         val reason: String,
         val retryable: Boolean = false,
+        val waitingForRootGrant: Boolean = false,
     ) : RootServiceState
 }
 
@@ -125,15 +127,40 @@ object RootServiceClient {
         activeConnection = connection
         bound = true
         try {
-            RootService.bind(Intent(context, GkdRootService::class.java), connection)
-            if (mutableState.value == RootServiceState.Connecting) {
-                val timeout = Runnable {
-                    if (connectionGeneration == generation &&
-                        activeConnection === connection &&
-                        mutableState.value == RootServiceState.Connecting
-                    ) {
+            // Acquire Root before asking libsu to launch a service. User approval must
+            // not consume the service handshake timeout or leave an en-route bind
+            // registered after a denied/non-root shell attempt.
+            Shell.getShell(Shell.EXECUTOR) { shell ->
+                // A denied shell must not poison later explicit/initial-setup retries.
+                if (!shell.isRoot) runCatching { shell.close() }
+                mainHandler.post rootReady@{
+                    if (!isActive(generation, connection)) return@rootReady
+                    if (!shell.isRoot) {
                         releaseBinding()
-                        mutableState.value = RootServiceState.Failed("connection timeout")
+                        mutableState.value = RootServiceState.Failed("root access not granted", waitingForRootGrant = true)
+                        return@rootReady
+                    }
+                    bindGrantedRoot(context, generation, connection)
+                }
+            }
+        } catch (e: Throwable) {
+            releaseBinding()
+            mutableState.value = RootServiceState.Failed(
+                e.message ?: e::class.java.simpleName,
+                retryable = true,
+            )
+            LogUtils.d("Root acquisition failed", e)
+        }
+    }
+
+    private fun bindGrantedRoot(context: Context, generation: Long, connection: ServiceConnection) {
+        try {
+            RootService.bind(Intent(context, GkdRootService::class.java), connection)
+            if (isActive(generation, connection) && mutableState.value == RootServiceState.Connecting) {
+                val timeout = Runnable {
+                    if (isActive(generation, connection) && mutableState.value == RootServiceState.Connecting) {
+                        releaseBinding()
+                        mutableState.value = RootServiceState.Failed("connection timeout", retryable = true)
                     }
                 }
                 activeConnectTimeout = timeout
@@ -141,8 +168,7 @@ object RootServiceClient {
             }
         } catch (e: Throwable) {
             clearConnectTimeout()
-            bound = false
-            activeConnection = null
+            releaseBinding()
             mutableState.value = RootServiceState.Failed(
                 e.message ?: e::class.java.simpleName,
                 retryable = true,
